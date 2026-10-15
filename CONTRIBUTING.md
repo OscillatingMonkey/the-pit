@@ -40,3 +40,10 @@ PIT=target/release/pit scripts/gen-commands-doc     # if you changed a command o
 Open an issue with `pit --version`, your platform, what you ran and what happened. **Never paste a
 secret value**; names and fingerprints (`pit ls`) are enough. Security problems go through
 [SECURITY.md](SECURITY.md) instead.
+
+## Releasing (maintainers)
+
+1. Bump `version` in `Cargo.toml`, add a `## X.Y.Z — date` section to `CHANGELOG.md`, commit, and
+   wait for CI to pass.
+2. `scripts/release vX.Y.Z` — tags, creates the GitHub release, and updates the formula in
+   [homebrew-the-pit](https://github.com/OscillatingMonkey/homebrew-the-pit).

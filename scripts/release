@@ -1,17 +1,35 @@
 #!/usr/bin/env bash
-# Point the Homebrew formula at a pushed release tag: scripts/release v1.0.0
+# Publish a release: scripts/release v1.2.3
+#
+# Tags HEAD, pushes the tag, creates the GitHub release from CHANGELOG.md, then points the
+# Homebrew formula in the tap (github.com/OscillatingMonkey/homebrew-the-pit) at it.
+# Set TAP_DIR to an existing clone of the tap; otherwise one is cloned into a temp folder.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 tag="${1:?usage: scripts/release vX.Y.Z}"
+version="${tag#v}"
+
+grep -q "^version = \"$version\"" Cargo.toml || { echo "Cargo.toml is not at $version" >&2; exit 1; }
+grep -q "^## $version " CHANGELOG.md || { echo "CHANGELOG.md has no $version section" >&2; exit 1; }
+[ -z "$(git status --porcelain)" ] || { echo "commit your changes first" >&2; exit 1; }
+
+git tag -a "$tag" -m "The Pit $version"
+git push origin "$tag"
+
+notes=$(awk -v v="$version" '$0 ~ "^## "v" " {on=1; next} /^## / {on=0} on' CHANGELOG.md)
+gh release create "$tag" --title "The Pit $version" --notes "$notes"
+
 url="https://github.com/OscillatingMonkey/the-pit/archive/refs/tags/${tag}.tar.gz"
 sha=$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)
-python3 - "$url" "$sha" <<'PY'
-import re, sys
-url, sha = sys.argv[1], sys.argv[2]
-p = "Formula/the-pit.rb"
-s = open(p).read()
-s = re.sub(r'\n  url "[^"]*"\n  sha256 "[^"]*"', "", s)
-s = s.replace('  license "MIT"\n', f'  url "{url}"\n  sha256 "{sha}"\n  license "MIT"\n', 1)
-open(p, "w").write(s)
-PY
-echo "Formula/the-pit.rb now points at $tag ($sha)"
+
+tap="${TAP_DIR:-}"
+if [ -z "$tap" ]; then
+  tap=$(mktemp -d)/homebrew-the-pit
+  git clone -q https://github.com/OscillatingMonkey/homebrew-the-pit.git "$tap"
+fi
+f="$tap/Formula/the-pit.rb"
+sed -i.bak -e "s|^  url \".*\"|  url \"$url\"|" -e "s|^  sha256 \".*\"|  sha256 \"$sha\"|" "$f"
+rm -f "$f.bak"
+git -C "$tap" commit -q -am "the-pit $version"
+git -C "$tap" push -q
+echo "Released $tag; tap formula points at $url ($sha)"

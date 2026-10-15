@@ -35,7 +35,7 @@ This takes about ten minutes. It ends with The Pit running in the background, on
 |---|---|---|
 | macOS (tested on Apple Silicon) or Linux | everything; Touch ID and the Keychain are macOS-only | — |
 | Homebrew **or** current stable Rust | installing `pit` | <https://brew.sh> or <https://rustup.rs> |
-| Xcode Command Line Tools | building from source (Homebrew and Cargo both build it) | `xcode-select --install` |
+| Xcode Command Line Tools | building from source (Homebrew and Cargo both compile it) | `xcode-select --install` |
 | `git` | `pit scan` (to tell committed files apart) | comes with the Command Line Tools |
 
 Optional — install only the ones you use:
@@ -52,14 +52,13 @@ Vercel, GitHub (with a token), S3/R2/B2 backups and `.env` files need nothing ex
 **Option A — Homebrew**
 
 ```sh
-brew tap oscillatingmonkey/the-pit https://github.com/OscillatingMonkey/the-pit
-brew install --HEAD oscillatingmonkey/the-pit/the-pit
+brew install oscillatingmonkey/the-pit/the-pit
 ```
 
-The tap needs the full URL because the formula lives in this repository. `--HEAD` builds the latest
-`main` from source (Homebrew installs Rust for the build — expect a few minutes). Once a version is
-tagged, `brew install oscillatingmonkey/the-pit/the-pit` (no `--HEAD`) installs that release, and
-`brew upgrade the-pit` moves you to newer ones.
+That taps [OscillatingMonkey/homebrew-the-pit](https://github.com/OscillatingMonkey/homebrew-the-pit)
+and builds the latest release from source (Homebrew installs Rust for the build — expect a few
+minutes). `brew upgrade the-pit` moves you to newer releases; `brew install --HEAD
+oscillatingmonkey/the-pit/the-pit` builds the current `main` instead.
 
 **Option B — build from the repository**
 
