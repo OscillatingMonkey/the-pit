@@ -29,16 +29,39 @@ This takes about ten minutes. It ends with The Pit running in the background, on
 
 ### 1. Install
 
+**What you need**
+
+| | Needed for | Install (macOS) |
+|---|---|---|
+| macOS (tested on Apple Silicon) or Linux | everything; Touch ID and the Keychain are macOS-only | — |
+| Homebrew **or** current stable Rust | installing `pit` | <https://brew.sh> or <https://rustup.rs> |
+| Xcode Command Line Tools | building from source (Homebrew and Cargo both build it) | `xcode-select --install` |
+| `git` | `pit scan` (to tell committed files apart) | comes with the Command Line Tools |
+
+Optional — install only the ones you use:
+
+| Tool | Needed for | Install |
+|---|---|---|
+| `flyctl` | pushing to Fly.io | `brew install flyctl` |
+| `gh` | `pit connect github --use-cli` (borrow gh's sign-in) | `brew install gh` |
+| `rclone` | backups to Google Drive, Dropbox, OneDrive… | `brew install rclone` |
+| `ssh` / `scp` | backups to another machine | built in |
+
+Vercel, GitHub (with a token), S3/R2/B2 backups and `.env` files need nothing extra.
+
 **Option A — Homebrew**
 
 ```sh
 brew tap oscillatingmonkey/the-pit https://github.com/OscillatingMonkey/the-pit
-brew install --HEAD the-pit      # `brew install the-pit` once a release is tagged
+brew install --HEAD oscillatingmonkey/the-pit/the-pit
 ```
 
-**Option B — build from the repository**
+The tap needs the full URL because the formula lives in this repository. `--HEAD` builds the latest
+`main` from source (Homebrew installs Rust for the build — expect a few minutes). Once a version is
+tagged, `brew install oscillatingmonkey/the-pit/the-pit` (no `--HEAD`) installs that release, and
+`brew upgrade the-pit` moves you to newer ones.
 
-You need a current stable Rust. If `cargo --version` prints nothing, install it from <https://rustup.rs>.
+**Option B — build from the repository**
 
 ```sh
 git clone https://github.com/OscillatingMonkey/the-pit.git
@@ -52,7 +75,7 @@ cargo install --path .
 pit --version
 ```
 
-You should see `pit 0.1.0`.
+You should see `pit 0.1.0`. If you installed both ways, `which pit` shows which one runs.
 
 ### 2. Create your vault
 
