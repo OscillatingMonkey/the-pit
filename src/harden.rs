@@ -27,6 +27,31 @@ pub fn agent() {
 }
 
 /// Peer credentials of a connected Unix socket: (uid, pid).
+#[cfg(target_os = "linux")]
+pub fn peer(fd: std::os::fd::RawFd) -> Option<(u32, i32)> {
+    let mut cred = libc::ucred {
+        pid: 0,
+        uid: 0,
+        gid: 0,
+    };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    let r = unsafe {
+        libc::getsockopt(
+            fd,
+            libc::SOL_SOCKET,
+            libc::SO_PEERCRED,
+            &mut cred as *mut _ as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    if r != 0 {
+        return None;
+    }
+    Some((cred.uid, cred.pid))
+}
+
+/// Peer credentials of a connected Unix socket: (uid, pid).
+#[cfg(not(target_os = "linux"))]
 pub fn peer(fd: std::os::fd::RawFd) -> Option<(u32, i32)> {
     let mut uid: libc::uid_t = 0;
     let mut gid: libc::gid_t = 0;
