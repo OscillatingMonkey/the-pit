@@ -1,0 +1,10 @@
+#!/bin/bash
+# Stand-in for rclone in tests: REMOTE:PATH maps to $FAKE_RCLONE/PATH.
+p() { echo "$FAKE_RCLONE/${1#*:}"; }
+case "$1" in
+  copyto) mkdir -p "$(dirname "$(p "$3")")"; cp "$2" "$(p "$3")" ;;
+  lsf) d="$(p "$3")"; [ -d "$d" ] || { echo "directory not found" >&2; exit 3; }; ls -1 "$d" ;;
+  cat) cat "$(p "$2")" ;;
+  deletefile) rm -f "$(p "$2")" ;;
+  *) exit 1 ;;
+esac

@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Point the Homebrew formula at a pushed release tag: scripts/release v1.0.0
+set -euo pipefail
+cd "$(dirname "$0")/.."
+tag="${1:?usage: scripts/release vX.Y.Z}"
+url="https://github.com/OscillatingMonkey/the-pit/archive/refs/tags/${tag}.tar.gz"
+sha=$(curl -fsSL "$url" | shasum -a 256 | cut -d' ' -f1)
+python3 - "$url" "$sha" <<'PY'
+import re, sys
+url, sha = sys.argv[1], sys.argv[2]
+p = "Formula/the-pit.rb"
+s = open(p).read()
+s = re.sub(r'\n  url "[^"]*"\n  sha256 "[^"]*"', "", s)
+s = s.replace('  license "MIT"\n', f'  url "{url}"\n  sha256 "{sha}"\n  license "MIT"\n', 1)
+open(p, "w").write(s)
+PY
+echo "Formula/the-pit.rb now points at $tag ($sha)"

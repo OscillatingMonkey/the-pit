@@ -1,0 +1,4 @@
+#!/bin/bash
+# Stand-in for scp in tests: copies SRC to $FAKE_REMOTE/<path of HOST:PATH>.
+dst="${@: -1}"; src="${@: -2:1}"
+cp "$src" "$FAKE_REMOTE/${dst#*:}"

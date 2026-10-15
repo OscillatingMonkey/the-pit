@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Regenerates docs/commands.md from the CLI's own help text.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+PIT=${PIT:-target/debug/pit}
+{
+  echo "# Command reference"
+  echo
+  echo "Generated from \`pit --help\` by \`scripts/gen-commands-doc\`. Every command also works inside the console (\`pit\`)."
+  echo
+  echo '```'
+  "$PIT" --help
+  echo '```'
+  for cmd in $("$PIT" --help | awk '/^Commands:/{f=1;next} /^Options:/{f=0} f && /^  [a-z]/ {print $1}'); do
+    echo
+    echo "## pit $cmd"
+    echo
+    echo '```'
+    "$PIT" "$cmd" --help
+    echo '```'
+    subs=$("$PIT" "$cmd" --help | awk '/^Commands:/{f=1;next} /^Options:/{f=0} f && /^  [a-z]/ && $1 != "help" {print $1}')
+    for sub in $subs; do
+      echo
+      echo "### pit $cmd $sub"
+      echo
+      echo '```'
+      "$PIT" "$cmd" "$sub" --help
+      echo '```'
+    done
+  done
+} > docs/commands.md
+echo "wrote docs/commands.md"

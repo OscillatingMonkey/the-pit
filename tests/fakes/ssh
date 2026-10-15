@@ -1,0 +1,4 @@
+#!/bin/bash
+# Stand-in for ssh in tests: runs the remote command in $FAKE_REMOTE.
+while [ "$1" != "--" ]; do shift; done; shift
+cd "$FAKE_REMOTE" && exec sh -c "$1"

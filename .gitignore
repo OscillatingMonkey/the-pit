@@ -1,0 +1,9 @@
+/target
+.DS_Store
+*.pitvault
+*.pitbundle
+*.pitsealed
+.env
+.env.*
+.venv/
+__pycache__/

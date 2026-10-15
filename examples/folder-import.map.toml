@@ -1,0 +1,45 @@
+# Example map for `pit import secret-pit DIR --map FILE`.
+#
+# DIR is laid out as DIR/<project>/<environment>/<file>:
+#   <destination>.env   KEY=value lines; a comment above a key becomes its description
+#   pit.env             addresses used in destination settings (app names, project ids)
+#   github-<name>.env   becomes a GitHub destination by itself
+#   anything else       stored as a file secret
+#
+# No values belong in this file — only names.
+
+# Environment folder → channel name.
+[channels]
+dev = "development"
+local = "development"
+
+[projects.myapp]
+description = "My application"
+
+[projects.myapp.channels.production]
+description = "Live"
+protected = true
+
+# Each [[dest]] says where one environment's keys are pushed. `{NAME}` in a
+# setting is filled from the channel's own (plain) secret of that name.
+[[dest]]
+project = "myapp"
+folder = "production"
+name = "api"
+kind = "fly"
+description = "The API on Fly.io"
+config = { app = "{FLY_APP}" }
+
+[[dest]]
+project = "myapp"
+folder = "production"
+name = "web"
+kind = "vercel"
+config = { project = "{VERCEL_PROJECT}", target = "production" }
+
+[[dest]]
+project = "myapp"
+folder = "dev"
+name = "api"
+kind = "dotenv"
+config = { path = "~/code/myapp/api/.env" }
