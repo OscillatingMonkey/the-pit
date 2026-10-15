@@ -156,6 +156,37 @@ p = spawn(["elevate", "--for", "2m"]); p.expect("Password: "); p.sendline(PW); p
 r = sh(["reveal", "demo/development", "API_KEY"])
 check("rotated-by-tool" in r.stdout, "elevation window allows reveal without re-prompt")
 
+# 10b. uninstalling and reinstalling the program keeps the vault: stop the agent, delete the
+# binary, install a fresh copy somewhere else, and everything is still there.
+import socket
+def stop_agent():
+    try:
+        s = socket.socket(socket.AF_UNIX); s.connect(SOCK(HOME)); s.sendall(b'{"op":"shutdown","args":{},"client":"cli"}\n'); s.recv(200)
+    except Exception: pass
+    time.sleep(1)
+def vault_files():
+    out = {}
+    for root, _, files in os.walk(os.path.join(HOME, "vault")):
+        for f in files:
+            fp = os.path.join(root, f); out[fp] = hashlib.sha256(open(fp, "rb").read()).hexdigest()
+    return out
+listing = sh(["ls"]).stdout
+sh(["lock"]); stop_agent()
+before = vault_files()
+old_bin = os.path.join(SP, "bin-old", "pit"); os.makedirs(os.path.dirname(old_bin)); shutil.copy2(PIT, old_bin)
+shutil.rmtree(os.path.dirname(old_bin))
+check(before and vault_files() == before, "removing the program leaves every vault file untouched")
+new_bin = os.path.join(SP, "bin-new", "pit"); os.makedirs(os.path.dirname(new_bin)); shutil.copy2(PIT, new_bin)
+p = pexpect.spawn(new_bin, ["unlock"], env=env, encoding="utf-8", timeout=60); p.expect("Password: "); p.sendline(PW); p.expect(pexpect.EOF)
+r = subprocess.run([new_bin, "ls"], capture_output=True, env=env, text=True)
+check(r.stdout == listing, "a fresh install lists the same projects, secrets and fingerprints")
+p = pexpect.spawn(new_bin, ["elevate"], env=env, encoding="utf-8", timeout=60); p.expect("Password: "); p.sendline(PW); p.expect(pexpect.EOF)
+r = subprocess.run([new_bin, "reveal", "demo/development", "API_KEY"], capture_output=True, env=env, text=True)
+check("rotated-by-tool" in r.stdout, "a fresh install opens the same values")
+stop_agent(); shutil.rmtree(os.path.dirname(new_bin))
+p = spawn(["unlock"]); p.expect("Password: "); p.sendline(PW); p.expect(pexpect.EOF)
+p = spawn(["elevate"]); p.expect("Password: "); p.sendline(PW); p.expect(pexpect.EOF)
+
 # 11. run injects env and files
 r = subprocess.run([PIT, "run", "-c", "demo/development", "--", "sh", "-c", 'echo "$API_KEY|$SHARED_URL"; cat "$PIT_FILE_SIGNING_KEY" | wc -c'], capture_output=True, env=env, text=True)
 check("rotated-by-tool|https://example.test" in r.stdout and "13" in r.stdout, "pit run injects env and file secrets")
