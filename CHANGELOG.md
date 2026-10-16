@@ -2,7 +2,11 @@
 
 ## 0.1.1 — 2026-10-15
 
-Security hardening and public assurance.
+Security hardening, public assurance, and a friendlier console.
+
+- Console: Tab completes commands, flags and project, channel, secret and destination names;
+  `help COMMAND`; a mistyped command gets suggestions and a list of common tasks (on the command
+  line too). `view`, `show` and `get` work for `reveal`, `list` for `ls`, `delete`/`remove` for `rm`.
 
 - Adding or changing a destination now always needs approval, on unprotected channels too.
 - Reveals, `pit run`, exports and pushes are refused if their audit-log entry cannot be written; a

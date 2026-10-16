@@ -18,6 +18,7 @@ Commands:
   approve       Approve a pending request (from an AI client or another terminal)
   approvals     List requests waiting for approval
   ls            Show projects, channels, secrets (names and fingerprints only) and destinations
+                [alias: list]
   needs         Secrets that are declared but still empty
   project       Manage projects
   channel       Manage channels (production, staging, development, …)
@@ -25,9 +26,9 @@ Commands:
   declare       Declare a secret with no value yet
   describe      Set a secret's description
   edit          Rename, re-tag or change how a secret is protected
-  rm            Delete a secret
+  rm            Delete a secret [aliases: delete, remove]
   mv            Move a secret to another scope (global, a project, or project/channel)
-  reveal        Show a secret's value (needs approval)
+  reveal        Show a secret's value (needs approval) [aliases: view, show, get]
   verify        Check a candidate value against a secret without revealing it (works for one-way
                 secrets)
   rollback      Put a secret's previous value back

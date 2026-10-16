@@ -221,6 +221,10 @@ pit myapp/development> push
 pit myapp/development> log -n 5
 ```
 
+**Tab** completes commands, flags, and project, channel, secret and destination names (never
+values). `help COMMAND` explains a command, and a mistyped command gets suggestions —
+`view`, `show` and `get` all work for `reveal`.
+
 ## Uninstall
 
 ```sh

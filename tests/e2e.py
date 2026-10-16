@@ -496,6 +496,15 @@ r = sh(["ls", "scanned"])
 check("STRIPE_KEY" in r.stdout and "CLIENT_SECRET" not in r.stdout, "scan imports only what was picked, under the chosen name")
 check(tree_hash(proj) == before, "scan leaves the project's files exactly as they were")
 
+# 21b. console: hints for a mistyped command, Tab completion (names only)
+p = spawn([]); p.expect("console")
+p.sendline("veiw"); p.expect("Did you mean"); p.expect("reveal PROJECT/CHANNEL NAME")
+check(True, "console explains a mistyped command and how to view a secret")
+p.send("rev\t"); p.expect("reveal "); p.sendcontrol("u")
+p.send("reveal demo/devel\t"); p.expect("demo/development "); p.send("API_\t"); p.expect("API_KEY "); p.sendcontrol("u")
+check(True, "console Tab completes commands, scopes and secret names")
+p.sendline("exit"); p.expect(pexpect.EOF)
+
 # 22. destroy
 p = spawn(["emergency", "destroy"]); p.expect(r"Type (DESTROY [0-9a-f]+)"); phrase = p.match.group(1); p.sendline(phrase); p.expect("vault is gone"); p.expect(pexpect.EOF)
 check(not os.path.exists(os.path.join(HOME, "vault/header.json")), "destroy removes the vault")

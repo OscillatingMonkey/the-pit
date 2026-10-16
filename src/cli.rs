@@ -53,6 +53,7 @@ pub enum Cmd {
     Approvals,
 
     /// Show projects, channels, secrets (names and fingerprints only) and destinations.
+    #[command(visible_alias = "list")]
     Ls { target: Option<String> },
     /// Secrets that are declared but still empty.
     Needs { project: Option<String> },
@@ -76,6 +77,7 @@ pub enum Cmd {
     /// Rename, re-tag or change how a secret is protected.
     Edit(EditArgs),
     /// Delete a secret.
+    #[command(visible_aliases = ["delete", "remove"])]
     Rm {
         #[arg(num_args = 1..=2)]
         args: Vec<String>,
@@ -86,6 +88,7 @@ pub enum Cmd {
         args: Vec<String>,
     },
     /// Show a secret's value (needs approval).
+    #[command(visible_aliases = ["view", "show", "get"])]
     Reveal(RevealArgs),
     /// Check a candidate value against a secret without revealing it (works for one-way secrets).
     Verify {
@@ -3254,6 +3257,114 @@ fn doctor() -> Result<i32> {
         .filter(|p| p.exists());
     check(legacy.is_none(), "no plaintext ~/secret-pit left behind", "~/secret-pit still holds plaintext secrets — after importing, `pit seal` a copy and remove it");
     Ok(if bad == 0 { 0 } else { 1 })
+}
+
+// ---------------------------------------------------------------------------
+// help for a mistyped command
+
+/// Words people reach for, and the command that does it.
+const INTENTS: &[(&[&str], &str)] = &[
+    (
+        &[
+            "see", "read", "cat", "open", "display", "print", "value", "reveal",
+        ],
+        "reveal",
+    ),
+    (&["secrets", "names", "tree", "all"], "ls"),
+    (
+        &[
+            "add", "new", "create", "put", "store", "save", "update", "change",
+        ],
+        "set",
+    ),
+    (&["del", "erase", "drop", "forget"], "rm"),
+    (&["send", "deploy", "sync", "upload", "publish"], "push"),
+    (&["history", "audit", "logs", "events"], "log"),
+    (&["login", "signin", "start"], "unlock"),
+    (&["logout", "close", "stop"], "lock"),
+    (&["rename", "protect", "tag"], "edit"),
+    (&["env", "exec", "inject"], "run"),
+    (&["backups", "restore", "snapshot"], "backup"),
+    (&["find", "search", "detect"], "scan"),
+];
+
+fn edit_distance(a: &str, b: &str) -> usize {
+    let b: Vec<char> = b.chars().collect();
+    let mut prev: Vec<usize> = (0..=b.len()).collect();
+    for (i, ca) in a.chars().enumerate() {
+        let mut cur = vec![i + 1];
+        for (j, cb) in b.iter().enumerate() {
+            cur.push(
+                (prev[j] + usize::from(ca != *cb))
+                    .min(prev[j + 1] + 1)
+                    .min(cur[j] + 1),
+            );
+        }
+        prev = cur;
+    }
+    prev[b.len()]
+}
+
+/// Every top-level command name and alias.
+pub fn command_names() -> Vec<String> {
+    use clap::CommandFactory;
+    let mut out = vec![];
+    for c in Cli::command().get_subcommands() {
+        out.push(c.get_name().to_string());
+        out.extend(c.get_all_aliases().map(String::from));
+    }
+    out
+}
+
+/// What to print when `word` is not a command. `prefix` is "pit " on the command
+/// line and "" in the console.
+pub fn unknown_command_help(word: &str, prefix: &str) -> String {
+    let w = word.to_lowercase();
+    let mut guesses: Vec<String> = INTENTS
+        .iter()
+        .filter(|(words, _)| words.contains(&w.as_str()))
+        .map(|(_, cmd)| cmd.to_string())
+        .collect();
+    let mut close: Vec<(usize, String)> = command_names()
+        .into_iter()
+        .map(|c| (edit_distance(&w, &c), c))
+        .filter(|(d, c)| *d <= 2 || (w.len() >= 3 && c.starts_with(&w)))
+        .collect();
+    close.sort();
+    for (_, c) in close {
+        if !guesses.contains(&c) {
+            guesses.push(c);
+        }
+    }
+    guesses.truncate(3);
+    let mut s = format!("`{word}` is not a command.");
+    if !guesses.is_empty() {
+        let list: Vec<String> = guesses.iter().map(|g| format!("`{prefix}{g}`")).collect();
+        s.push_str(&format!(" Did you mean {}?", list.join(" or ")));
+    }
+    s.push_str("\n\nThings you can do:\n");
+    for (cmd, what) in [
+        ("ls [PROJECT]", "see projects, channels and secret names"),
+        (
+            "reveal PROJECT/CHANNEL NAME",
+            "view a secret's value (asks for approval)",
+        ),
+        ("set PROJECT/CHANNEL NAME", "add or change a secret"),
+        ("rm PROJECT/CHANNEL NAME", "delete a secret"),
+        (
+            "push PROJECT/CHANNEL",
+            "send a channel's secrets to its destinations",
+        ),
+        ("log", "what happened, and which program asked"),
+    ] {
+        s.push_str(&format!("  {:<34} {what}\n", format!("{prefix}{cmd}")));
+    }
+    if prefix.is_empty() {
+        s.push_str("\n`help` lists every command, `help COMMAND` explains one; Tab completes.");
+    } else {
+        s.push_str("\n`pit --help` lists every command, `pit COMMAND --help` explains one.");
+    }
+    s
 }
 
 #[cfg(test)]
