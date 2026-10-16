@@ -8,10 +8,10 @@ fn main() {
     let cli = match cli::Cli::try_parse() {
         Ok(c) => c,
         Err(e) if e.kind() == clap::error::ErrorKind::InvalidSubcommand => {
-            let word = std::env::args()
-                .skip(1)
-                .find(|a| !a.starts_with('-'))
-                .unwrap_or_default();
+            let word = match e.get(clap::error::ContextKind::InvalidSubcommand) {
+                Some(clap::error::ContextValue::String(w)) => w.clone(),
+                _ => String::new(),
+            };
             eprintln!("{}", cli::unknown_command_help(&word, "pit "));
             std::process::exit(2);
         }
