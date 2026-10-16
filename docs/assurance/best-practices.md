@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | **Project** | The Pit — <https://github.com/OscillatingMonkey/the-pit> |
-| **Version** | 0.1.0 |
+| **Version** | 0.1.1 |
 | **Date** | 2026-10-15 |
 | **Criteria** | [OpenSSF Best Practices "passing" level](https://www.bestpractices.dev/en/criteria/0) (criterion names as in the badge project's `criteria.yml`) |
 
@@ -52,7 +52,7 @@ Base URL used below: `https://github.com/OscillatingMonkey/the-pit/blob/main/`
 | `sites_https` | MUST | **Met** | The repository, releases and the Homebrew tap are served by GitHub over HTTPS. |
 | `discussion` | MUST | **Met** | GitHub Issues and pull requests: searchable, URL-addressable, open to anyone with a GitHub account, no proprietary client needed. <https://github.com/OscillatingMonkey/the-pit/issues> |
 | `english` | SHOULD | **Met** | All documentation is in English; reports are accepted in English. |
-| `maintained` | MUST | **Met** | Actively developed; 0.1.0 released 2026-10-15, with the newest release and `main` receiving fixes. <https://github.com/OscillatingMonkey/the-pit/blob/main/SECURITY.md#supported-versions> |
+| `maintained` | MUST | **Met** | Actively developed; 0.1.0 and 0.1.1 released 2026-10-15, with the newest release and `main` receiving fixes. <https://github.com/OscillatingMonkey/the-pit/blob/main/SECURITY.md#supported-versions> |
 
 ## Change control
 

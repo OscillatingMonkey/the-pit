@@ -82,7 +82,7 @@ cargo install --path .
 pit --version
 ```
 
-You should see `pit 0.1.0`. If you installed both ways, `which pit` shows which one runs.
+You should see `pit 0.1.1`. If you installed both ways, `which pit` shows which one runs.
 
 ### 2. Create your vault
 

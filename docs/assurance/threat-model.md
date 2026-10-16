@@ -2,7 +2,7 @@
 
 | | |
 | --- | --- |
-| **Version covered** | 0.1.0 |
+| **Version covered** | 0.1.1 |
 | **Date** | 2026-10-15 |
 | **Method** | STRIDE per element, over the data-flow diagram below |
 | **Scope** | The `pit` binary (CLI, console, agent, MCP server), its files on disk, its backups, and the integrations it pushes to |
@@ -13,7 +13,7 @@ design-level description. It does not describe how to attack a vault. It agrees 
 [docs/security.md](../security.md) and [SECURITY.md](../../SECURITY.md); if they ever disagree, treat
 that as a bug and report it.
 
-Source references are to files and functions in `src/` at version 0.1.0.
+Source references are to files and functions in `src/` at version 0.1.1.
 
 ---
 
@@ -294,7 +294,7 @@ Consistent with [SECURITY.md](../../SECURITY.md#out-of-scope) and [docs/security
 - Values once delivered to a service or to a `.env` file the owner asked for.
 - Root, kernel-level or physical-memory attacks on a running, unlocked machine.
 - Loss of every key (password, recovery code and shares): the vault is unrecoverable by design.
-- Linux-specific protections that depend on the Keychain or Touch ID (they are macOS-only in 0.1.0).
+- Linux-specific protections that depend on the Keychain or Touch ID (they are macOS-only in 0.1.1).
 
 ## 8. Summary of residual risks
 

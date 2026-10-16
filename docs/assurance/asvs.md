@@ -3,7 +3,7 @@
 | | |
 | --- | --- |
 | Date | 2026-10-15 |
-| Version assessed | 0.1.0 plus unreleased hardening on main (2026-10-15): commit `a25b7e7` and the working-tree changes on `main` that day. |
+| Version assessed | 0.1.1 (2026-10-15). |
 | Standard | OWASP Application Security Verification Standard 5.0.0, Level 3 |
 | Kind | **Self-assessment by the maintainer. This is not an independent audit**, and it is not a certification. |
 
@@ -447,7 +447,7 @@ Ordered roughly by how much each would raise assurance. IDs are the ASVS 5.0.0 r
     (V6.1.2, V7.1.1, V7.1.2, V2.1.3, V13.1.3, V13.1.4, V13.2.1, V14.1.2, V14.2.7, V8.1.3, V8.1.4,
     V15.1.3, V15.1.4, V15.1.5, V15.2.5, V16.1.1)
 
-**Closed since 0.1.0 (unreleased, on `main`)**
+**Closed in 0.1.1**
 
 - Request-size and connection caps in the agent. (V15.2.2, V15.4.4)
 - Dependency fix times, `cargo audit`/`cargo deny`/OSV in CI, crates.io-only sources, `--locked`

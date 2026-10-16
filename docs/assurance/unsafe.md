@@ -5,7 +5,7 @@ Rust's memory-safety guarantees cover everything except code marked `unsafe`. Th
 have no safe Rust wrapper. There is no `unsafe` in the cryptography, the parsers or the vault
 format: those use the RustCrypto crates and safe Rust only.
 
-Reviewed: 2026-10-15, version 0.1.0. CI's Semgrep job skips its generic "unsafe used" rule
+Reviewed: 2026-10-15, version 0.1.1. CI's Semgrep job skips its generic "unsafe used" rule
 because every use is listed and reviewed here; a new `unsafe` block should be added to this
 table in the same pull request.
 
