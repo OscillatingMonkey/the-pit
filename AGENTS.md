@@ -21,6 +21,10 @@ another project, read [docs/for-machines.md](docs/for-machines.md) instead.
 | `src/cli.rs`, `src/console.rs`, `src/mcp.rs` | the three front ends |
 | `examples/folder-import.map.toml` | example map for `pit import secret-pit` |
 | `tests/e2e.py`, `tests/fakes/` | end-to-end suite (throwaway `PIT_HOME`); stand-in ssh/scp/rclone |
+| `src/lib.rs`, `src/main.rs` | the library (all modules) and the thin `pit` binary over it |
+| `tests/crypto_vectors.rs`, `tests/security_core.rs`, `tests/vectors/` | Wycheproof / RFC known-answer tests; edge cases for mutation testing |
+| `fuzz/` | cargo-fuzz targets for every parser of outside input |
+| `docs/assurance/` | threat model, OWASP ASVS self-assessment, best-practices answers, `unsafe` review |
 
 ## Rules for changes
 

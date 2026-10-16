@@ -1,34 +1,7 @@
-//! The Pit — an encrypted, local secrets vault for developers.
-
-mod agent;
-mod audit;
-mod backup;
-mod cli;
-mod codes;
-mod console;
-mod crypto;
-mod error;
-mod harden;
-mod importer;
-mod keychain;
-mod mcp;
-mod model;
-mod ops;
-mod paths;
-mod presence;
-mod protocol;
-mod rail;
-mod resolve;
-mod s3;
-mod scan;
-mod service;
-mod shamir;
-mod totp;
-mod ui;
-mod values;
-mod vault;
+//! The `pit` command.
 
 use clap::Parser;
+use the_pit::{cli, error, harden, ui};
 
 fn main() {
     harden::process();

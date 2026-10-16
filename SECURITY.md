@@ -37,6 +37,24 @@ Only the newest release (and `main`) receives fixes while The Pit is at 0.x.
   open session allows. [docs/security.md](docs/security.md) describes this limit and what reduces it.
 - Values once delivered to a service or a `.env` file you asked for.
 
+## Dependencies and the supply chain
+
+- Dependencies come from crates.io only, under a license allow-list (`deny.toml`), and are checked
+  daily against the RustSec and OSV advisory databases (`.github/workflows/security.yml`).
+- **Fix times:** a published advisory affecting a dependency is fixed (upgraded, replaced or shown not
+  to apply) within **7 days** if it is rated high or critical, within **30 days** otherwise.
+  Dependabot opens the upgrade pull requests; nothing merges without CI passing.
+- Every GitHub Action is pinned to a full commit hash.
+- Release binaries are built by GitHub Actions and carry signed build provenance and an SBOM.
+  Check a download before running it:
+  `gh attestation verify pit-<version>-<platform>.tar.gz --repo OscillatingMonkey/the-pit`
+
+## Evidence
+
+Every check — advisories, static analysis, CodeQL, fuzzing, coverage, mutation testing, crypto test
+vectors, the threat model and the OWASP ASVS self-assessment — is listed in
+[docs/assurance](docs/assurance/README.md), with links to its latest public results.
+
 ## Status
 
 The Pit has **not** had an independent audit. It composes audited RustCrypto primitives

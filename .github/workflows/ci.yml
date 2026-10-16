@@ -13,27 +13,32 @@ jobs:
     name: macOS — lint, unit and end-to-end tests
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
         with:
           components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
       - run: cargo fmt --check
-      - run: cargo clippy --release --all-targets -- -D warnings
-      - run: cargo test --release
-      - run: cargo build --release
+      - run: cargo clippy --locked --release --all-targets -- -D warnings
+      - name: Unit tests and crypto test vectors
+        run: cargo test --locked --release
+      - run: cargo build --locked --release
       - name: End-to-end tests (throwaway vault)
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install --quiet pexpect
+          .venv/bin/pip install --quiet pexpect==4.9.0
           PIT_BIN=target/release/pit .venv/bin/python tests/e2e.py
 
   linux:
     name: Linux — build and unit tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --release
-      - run: cargo test --release
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # stable
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - run: cargo build --locked --release
+      - run: cargo test --locked --release

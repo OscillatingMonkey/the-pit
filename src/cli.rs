@@ -1965,8 +1965,10 @@ fn run_with_env(a: RunArgs) -> Result<i32> {
     let tmp = if files.is_empty() {
         None
     } else {
-        let dir = std::env::temp_dir().join(format!("pit-run-{}", &crypto::random_id()[..12]));
-        paths::private_dir(&dir)?;
+        // Unguessable name, created exclusively with mode 0700 (fails if anything is there).
+        // nosemgrep: rust.lang.security.temp-dir.temp-dir
+        let dir = std::env::temp_dir().join(format!("pit-run-{}", crypto::random_id()));
+        paths::new_private_dir(&dir)?;
         for f in &files {
             let name = f["name"].as_str().unwrap_or("file");
             let fname = f["filename"]
@@ -2051,6 +2053,13 @@ fn log(a: LogArgs) -> Result<()> {
                 } else {
                     String::new()
                 }
+            ),
+            "push.start" => format!(
+                "{}/{} {} → {}",
+                d["project"].as_str().unwrap_or(""),
+                d["channel"].as_str().unwrap_or(""),
+                d["destination"].as_str().unwrap_or(""),
+                d["address"].as_str().unwrap_or(""),
             ),
             _ => d.to_string(),
         };

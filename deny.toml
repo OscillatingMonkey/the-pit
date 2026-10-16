@@ -1,0 +1,38 @@
+# cargo-deny: run by .github/workflows/security.yml — `cargo deny check`
+
+[graph]
+all-features = true
+
+[advisories]
+# Every RustSec advisory (vulnerable, unmaintained, unsound, yanked) fails the check
+# unless listed here with a reason.
+ignore = []
+
+[licenses]
+# Permissive licenses only, compatible with distributing The Pit under MIT.
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Zlib",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+]
+confidence-threshold = 0.9
+# MPL-2.0 is file-level copyleft: fine to use unmodified from an MIT program.
+exceptions = [
+    { crate = "option-ext", allow = ["MPL-2.0"] },
+]
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+# Dependencies come from crates.io only — no git or other registries.
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

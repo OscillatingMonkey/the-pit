@@ -1,0 +1,89 @@
+# Dependency and code scanning. Results: the run's summary page (public), and the badge in the README.
+name: Security
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "17 6 * * *" # daily: new advisories appear without code changes
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-audit:
+    name: RustSec advisories (cargo-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-audit
+      - name: cargo audit
+        run: |
+          set +e
+          cargo audit --deny warnings 2>&1 | tee audit.txt
+          status=${PIPESTATUS[0]}
+          { echo '## cargo audit'; echo '```'; tail -n 40 audit.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  cargo-deny:
+    name: Licenses, sources, bans (cargo-deny)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: taiki-e/install-action@1168f6810a3cb30a3514bf5756a3b7f0422c6df8 # v2.87.28
+        with:
+          tool: cargo-deny
+      - name: cargo deny check
+        run: |
+          set +e
+          cargo deny check 2>&1 | tee deny.txt
+          status=${PIPESTATUS[0]}
+          { echo '## cargo deny'; echo '```'; tail -n 30 deny.txt; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status
+
+  osv-scanner:
+    name: OSV database (osv-scanner)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install osv-scanner
+        run: go install github.com/google/osv-scanner/v2/cmd/osv-scanner@v2.7.0
+      - name: Scan Cargo.lock files
+        run: |
+          set +e
+          "$(go env GOPATH)/bin/osv-scanner" scan source --lockfile Cargo.lock --lockfile fuzz/Cargo.lock --format markdown > osv.md
+          status=$?
+          { echo '## OSV-Scanner'; cat osv.md; } >> "$GITHUB_STEP_SUMMARY"
+          cat osv.md
+          exit $status
+
+  semgrep:
+    name: Static analysis (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install Semgrep
+        run: python3 -m pip install --quiet semgrep==1.180.0
+      - name: semgrep scan
+        # Every `unsafe` block is listed and reviewed in docs/assurance/unsafe.md instead
+        # of being flagged one by one.
+        run: |
+          set +e
+          semgrep scan --metrics=off --config p/rust --config p/secrets \
+            --exclude-rule rust.lang.security.unsafe-usage.unsafe-usage \
+            --exclude tests/vectors --error --text --output semgrep.txt .
+          status=$?
+          { echo '## Semgrep (p/rust, p/secrets)'; echo '```'; cat semgrep.txt; echo '```'; [ $status = 0 ] && echo 'No findings.'; } >> "$GITHUB_STEP_SUMMARY"
+          exit $status

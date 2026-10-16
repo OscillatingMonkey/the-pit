@@ -53,7 +53,11 @@ Every identity also gets an **X25519 key pair**, so bundles can be encrypted to 
   age, after idle time, or on `pit lock`.
 - **Throttling.** After 3 wrong passwords or codes — at unlock or at an approval — each further attempt
   waits exponentially longer (up to an hour), and 6 wrong approvals close the session. The count
-  survives restarts.
+  survives restarts and is kept in more than one place, so clearing one does not reset it.
+- **Destinations need approval.** Adding or changing a destination — where values get sent — always
+  asks for your approval, on any channel.
+- **No log entry, no value.** Reveals, `pit run`, exports and pushes are refused if their audit entry
+  cannot be written; a push is logged before anything is sent.
 - **No secret on a command line, in a URL or in a log.** Values travel over standard input or request
   bodies; passwords are read from the terminal with echo off.
 - **Atomic writes.** Every file is written to a temporary file, flushed, and renamed. The last 30
@@ -100,8 +104,8 @@ permissions. The Pit is built so that is not enough:
 Be clear-eyed about these, as with any local vault:
 
 - Software running as you while the pit is **unlocked** can ask the agent for what an unlocked session
-  allows without approval: listing names, and pushing unprotected channels to their configured
-  destinations (which re-writes files that already exist there). Keep sessions short
+  allows without approval: listing names, and pushing unprotected channels to the destinations you
+  already approved (which re-writes files that already exist there). Keep sessions short
   (`pit settings idle_secs 15m`), lock when you step away, and protect channels whose secrets matter.
 - Once a secret is pushed to a service or rendered into a `.env` file, its safety there is that
   service's or that file's.

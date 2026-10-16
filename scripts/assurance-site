@@ -1,0 +1,139 @@
+#!/usr/bin/env python3
+"""Build the public assurance report from the Assurance workflow's results.
+
+    scripts/assurance-site RESULTS_DIR SITE_DIR COMMIT RUN_URL
+
+RESULTS_DIR holds the downloaded artifacts (coverage/, mutants/, fuzz-*/, sbom/).
+Writes SITE_DIR/index.html, the coverage report, the SBOM, and shields.io badge files
+under SITE_DIR/badges/.
+"""
+import html, json, os, shutil, sys, time
+
+results, site, commit, run_url = sys.argv[1:5]
+repo = "https://github.com/OscillatingMonkey/the-pit"
+os.makedirs(os.path.join(site, "badges"), exist_ok=True)
+
+
+def read(*p, default=None):
+    try:
+        with open(os.path.join(results, *p)) as f:
+            return f.read()
+    except OSError:
+        return default
+
+
+def badge(name, label, message, color):
+    with open(os.path.join(site, "badges", name + ".json"), "w") as f:
+        json.dump({"schemaVersion": 1, "label": label, "message": message, "color": color}, f)
+
+
+def color(pct, good=80, ok=60):
+    return "brightgreen" if pct >= good else "yellow" if pct >= ok else "orange"
+
+
+rows = []
+
+# coverage
+cov = read("coverage", "summary.json")
+if cov:
+    t = json.loads(cov)["data"][0]["totals"]
+    lines, funcs, regions = (t[k]["percent"] for k in ("lines", "functions", "regions"))
+    shutil.copytree(os.path.join(results, "coverage"), os.path.join(site, "coverage"), dirs_exist_ok=True)
+    badge("coverage", "coverage", f"{lines:.0f}%", color(lines))
+    rows.append(("Test coverage", f"{lines:.1f}% of lines, {funcs:.1f}% of functions, {regions:.1f}% of regions — unit tests, crypto test vectors and the end-to-end suite together",
+                 '<a href="coverage/html/index.html">line-by-line report</a>' if os.path.isdir(os.path.join(results, "coverage", "html")) else "", True))
+else:
+    badge("coverage", "coverage", "not run", "lightgrey")
+    rows.append(("Test coverage", "not available in this run", "", None))
+
+# mutation testing
+outcomes = read("mutants", "outcomes.json")
+if outcomes:
+    o = json.loads(outcomes)
+    caught, missed, timeout, unviable = (o.get(k, 0) for k in ("caught", "missed", "timeout", "unviable"))
+    tested = caught + missed + timeout
+    score = 100.0 * (caught + timeout) / tested if tested else 0.0
+    badge("mutants", "mutation score", f"{score:.0f}%", color(score))
+    missed_list = (read("mutants", "missed.txt", default="") or "").strip()
+    detail = f"<details><summary>{missed} not caught</summary><pre>{html.escape(missed_list)}</pre></details>" if missed else ""
+    rows.append(("Mutation testing", f"{score:.1f}% of {tested} deliberate bugs in crypto, recovery codes, Shamir sharing and TOTP were caught by the tests ({unviable} did not compile)", detail, score >= 80))
+else:
+    badge("mutants", "mutation score", "not run", "lightgrey")
+    rows.append(("Mutation testing", "not available in this run", "", None))
+
+# fuzzing
+fuzz = []
+for d in sorted(os.listdir(results)) if os.path.isdir(results) else []:
+    if d.startswith("fuzz-"):
+        for root, _, files in os.walk(os.path.join(results, d)):
+            for f in files:
+                if f.endswith(".json"):
+                    fuzz.append(json.load(open(os.path.join(root, f))))
+if fuzz:
+    total = sum(x["runs"] for x in fuzz)
+    crashed = [x["target"] for x in fuzz if not x["ok"]]
+    badge("fuzzing", "fuzzing", "crash found" if crashed else f"{total/1e6:.1f}M inputs, 0 crashes", "red" if crashed else "brightgreen")
+    items = "".join(f"<li><code>{html.escape(x['target'])}</code>: {x['runs']:,} inputs in {x['seconds']} s — {'no crashes' if x['ok'] else '<b>crash</b>'}</li>" for x in fuzz)
+    rows.append(("Fuzzing", f"{len(fuzz)} targets, {total:,} random inputs with AddressSanitizer — {'crashes in ' + ', '.join(crashed) if crashed else 'no crashes, hangs or memory errors'}", f"<ul>{items}</ul>", not crashed))
+else:
+    badge("fuzzing", "fuzzing", "not run", "lightgrey")
+    rows.append(("Fuzzing", "not available in this run", "", None))
+
+# advisories and SBOM
+for name, label, title in (("audit", "RustSec", "Known vulnerabilities (cargo-audit, RustSec)"), ("deny", "cargo-deny", "Licenses, sources and advisories (cargo-deny)")):
+    status = (read("sbom", name + ".status", default="") or "").strip()
+    out = read("sbom", name + ".txt", default="") or ""
+    if status:
+        ok = status == "0"
+        rows.append((title, "pass" if ok else "FAILED", f"<details><summary>output</summary><pre>{html.escape(out[-6000:])}</pre></details>", ok))
+sbom = os.path.join(results, "sbom", "the-pit.cdx.json")
+if os.path.exists(sbom):
+    shutil.copy(sbom, os.path.join(site, "the-pit.cdx.json"))
+    n = len(json.load(open(sbom)).get("components", []))
+    rows.append(("Software bill of materials", f"{n} components (CycloneDX)", '<a href="the-pit.cdx.json">the-pit.cdx.json</a>', True))
+
+docs = [
+    ("Threat model (STRIDE)", "docs/assurance/threat-model.md"),
+    ("OWASP ASVS 5.0 self-assessment", "docs/assurance/asvs.md"),
+    ("OpenSSF Best Practices answers", "docs/assurance/best-practices.md"),
+    ("unsafe code review", "docs/assurance/unsafe.md"),
+    ("Security design", "docs/security.md"),
+    ("All checks and how to reproduce them", "docs/assurance/README.md"),
+]
+
+mark = {True: "✓", False: "✗", None: "–"}
+body = "".join(
+    f'<tr><td class="m {"ok" if ok else "bad" if ok is False else "na"}">{mark[ok]}</td><th>{html.escape(t)}</th><td>{html.escape(s)}{("<div>" + extra + "</div>") if extra else ""}</td></tr>'
+    for t, s, extra, ok in rows
+)
+links = "".join(f'<li><a href="{repo}/blob/main/{p}">{html.escape(t)}</a></li>' for t, p in docs)
+page = f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>The Pit — Assurance</title>
+<style>
+:root {{ --bg:#fff; --fg:#1b1f24; --muted:#59636e; --line:#d1d9e0; --ok:#1a7f37; --bad:#cf222e; --code:#f6f8fa; }}
+@media (prefers-color-scheme: dark) {{ :root {{ --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1; --line:#30363d; --ok:#3fb950; --bad:#f85149; --code:#161b22; }} }}
+body {{ background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,-apple-system,sans-serif; margin:0 auto; max-width:960px; padding:24px 16px; }}
+a {{ color:inherit; }} .muted {{ color:var(--muted); }}
+table {{ border-collapse:collapse; width:100%; }} th, td {{ border-top:1px solid var(--line); padding:10px 8px; text-align:left; vertical-align:top; }}
+th {{ white-space:nowrap; }} td.m {{ font-weight:700; width:1.5em; }} .ok {{ color:var(--ok); }} .bad {{ color:var(--bad); }} .na {{ color:var(--muted); }}
+pre {{ background:var(--code); padding:8px; overflow-x:auto; font-size:13px; white-space:pre-wrap; }}
+@media (max-width:640px) {{ th {{ white-space:normal; }} }}
+</style></head><body>
+<h1>The Pit — security assurance report</h1>
+<p class="muted">Generated {time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime())} from commit <a href="{repo}/commit/{commit}"><code>{commit[:12]}</code></a> by the <a href="{run_url}">Assurance workflow</a>. Every number here is produced by CI from the public source; nothing is entered by hand.</p>
+<table>{body}</table>
+<h2>Continuous checks</h2>
+<ul>
+<li><a href="{repo}/actions/workflows/security.yml">Security workflow</a> — cargo-audit, cargo-deny, OSV-Scanner and Semgrep on every push and daily</li>
+<li><a href="{repo}/actions/workflows/codeql.yml">CodeQL</a> — GitHub's semantic code analysis (Rust and workflow files)</li>
+<li><a href="https://scorecard.dev/viewer/?uri=github.com/OscillatingMonkey/the-pit">OpenSSF Scorecard</a> — the project's security practices, graded independently</li>
+<li><a href="{repo}/actions/workflows/ci.yml">CI</a> — lint, unit tests, crypto test vectors (Wycheproof, RFC 9106) and the end-to-end suite</li>
+</ul>
+<h2>Documents</h2><ul>{links}</ul>
+<p class="muted">This is evidence, not a guarantee: The Pit has not had an independent audit. Report problems privately — see <a href="{repo}/blob/main/SECURITY.md">SECURITY.md</a>.</p>
+</body></html>
+"""
+with open(os.path.join(site, "index.html"), "w") as f:
+    f.write(page)
+print(f"wrote {site}/index.html with {len(rows)} rows")

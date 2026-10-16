@@ -5,9 +5,10 @@
 //! human for approval before anything sensitive.
 
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::os::fd::AsRawFd;
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -43,6 +44,17 @@ impl Session {
 
     pub fn audit(&self, event: &str, actor: &str, data: Value) {
         let _ = audit::record(&self.keys, event, actor, data);
+    }
+
+    /// For operations that hand out values: no log entry, no value.
+    pub fn audit_strict(&self, event: &str, actor: &str, data: Value) -> Result<()> {
+        audit::record(&self.keys, event, actor, data)
+            .map(|_| ())
+            .map_err(|e| {
+                Error::Invalid(format!(
+                    "could not write the audit log ({e}); nothing was handed out"
+                ))
+            })
     }
 
     fn expired(&self) -> bool {
@@ -93,11 +105,43 @@ fn throttle_path() -> std::path::PathBuf {
     paths::state_dir().join("throttle.json")
 }
 
+/// The failure count is kept in three places — a file, the OS keychain and this
+/// process — and the highest one counts, so clearing one does not clear it.
+static THROTTLE: Mutex<Throttle> = Mutex::new(Throttle {
+    failures: 0,
+    last: 0,
+});
+
+fn throttle_account() -> String {
+    let home = paths::home();
+    format!(
+        "throttle-{}",
+        &crypto::sha256_hex(home.to_string_lossy().as_bytes())[..16]
+    )
+}
+
 fn throttle_load() -> Throttle {
-    std::fs::read(throttle_path())
+    let file: Throttle = std::fs::read(throttle_path())
         .ok()
         .and_then(|b| serde_json::from_slice(&b).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let kc: Throttle = crate::keychain::get(&throttle_account())
+        .ok()
+        .flatten()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default();
+    let mem = THROTTLE.lock().unwrap_or_else(|p| p.into_inner());
+    [
+        file,
+        kc,
+        Throttle {
+            failures: mem.failures,
+            last: mem.last,
+        },
+    ]
+    .into_iter()
+    .max_by_key(|t| (t.failures, t.last))
+    .unwrap_or_default()
 }
 
 fn throttle_check() -> Result<()> {
@@ -118,15 +162,17 @@ fn throttle_fail() {
     let mut t = throttle_load();
     t.failures += 1;
     t.last = now();
-    let _ = paths::write_private(
-        &throttle_path(),
-        &serde_json::to_vec(&t).unwrap_or_default(),
-    );
+    let bytes = serde_json::to_vec(&t).unwrap_or_default();
+    let _ = paths::write_private(&throttle_path(), &bytes);
+    let _ = crate::keychain::set(&throttle_account(), &bytes);
+    *THROTTLE.lock().unwrap_or_else(|p| p.into_inner()) = t;
 }
 
 fn throttle_reset() -> u32 {
     let t = throttle_load();
     let _ = std::fs::remove_file(throttle_path());
+    let _ = crate::keychain::delete(&throttle_account());
+    *THROTTLE.lock().unwrap_or_else(|p| p.into_inner()) = Throttle::default();
     t.failures
 }
 
@@ -179,19 +225,35 @@ pub fn run(foreground: bool) -> Result<()> {
         if uid != me {
             continue;
         }
+        if ACTIVE.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+            ACTIVE.fetch_sub(1, Ordering::SeqCst);
+            continue;
+        }
         let st = state.clone();
         std::thread::spawn(move || {
             let _ = serve(stream, st, pid);
+            ACTIVE.fetch_sub(1, Ordering::SeqCst);
         });
     }
     Ok(())
 }
 
+/// Connections served at once; more are closed until one finishes.
+const MAX_CONNECTIONS: usize = 64;
+static ACTIVE: AtomicUsize = AtomicUsize::new(0);
+
+/// Largest request accepted on the socket (file secrets and bundles included).
+const MAX_REQUEST: u64 = 64 * 1024 * 1024;
+
 fn serve(stream: UnixStream, state: Shared, pid: i32) -> Result<()> {
     stream.set_read_timeout(Some(Duration::from_secs(30)))?;
-    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut reader = BufReader::new(stream.try_clone()?).take(MAX_REQUEST);
     let mut line = String::new();
     reader.read_line(&mut line)?;
+    if !line.ends_with('\n') && line.len() as u64 >= MAX_REQUEST {
+        line.zeroize();
+        return Err(Error::Invalid("request too large".into()));
+    }
     let req: std::result::Result<Request, _> = serde_json::from_str(&line);
     line.zeroize();
     let resp = match req {

@@ -234,7 +234,9 @@ pub fn needs_approval(state: &Shared, caller: &Caller, req: &Request) -> Result<
         "run.env" => protected || lib.settings.run_needs_approval,
         "secret.declare" | "secret.generate" => protected,
         "secret.set" | "secret.edit" | "secret.move" => protected || ai,
-        "dest.add" | "dest.edit" | "dest.rm" => protected || ai,
+        // Where values go is always the owner's call, protected channel or not.
+        "dest.add" | "dest.edit" => true,
+        "dest.rm" => protected || ai,
         "channel.edit" => protected || ai,
         "import.secretpit" => !b(req, "dry_run").unwrap_or(false),
         // Adding new values is like `pit set`; replacing existing ones is not.
@@ -465,11 +467,11 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
                 "fp": sec.fingerprint(),
                 "clipboard_secs": s.lib.settings.clipboard_secs,
             });
-            s.audit(
+            s.audit_strict(
                 "reveal",
                 &caller.actor,
                 json!({"scope": sc.to_string(), "name": name, "fp": sec.fingerprint()}),
-            );
+            )?;
             Ok(out)
         }
         "secret.verify" => {
@@ -587,7 +589,7 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
                 recipient.as_deref(),
                 b(req, "connections").unwrap_or(false),
             )?;
-            s.audit("bundle.export", &caller.actor, json!({"projects": projects, "passphrase": pass.is_some(), "recipient": recipient.is_some()}));
+            s.audit_strict("bundle.export", &caller.actor, json!({"projects": projects, "passphrase": pass.is_some(), "recipient": recipient.is_some()}))?;
             Ok(json!({"bundle_b64": crypto::b64e(&data)}))
         }
         "bundle.import" => {
@@ -607,11 +609,11 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
         "emergency.export" => {
             let pass = o(req, "passphrase").map(|p| Zeroizing::new(p.to_string()));
             let data = backup::emergency_export(s, pass.as_deref().map(|p| p.as_str()))?;
-            s.audit(
+            s.audit_strict(
                 "emergency.export",
                 &caller.actor,
                 json!({"encrypted": pass.is_some()}),
-            );
+            )?;
             Ok(json!({"export_b64": crypto::b64e(&data), "encrypted": pass.is_some()}))
         }
 
@@ -1476,6 +1478,15 @@ fn push(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
     }
     let mut results = vec![];
     for d in dests {
+        // Logged before anything is sent: if the log cannot be written, nothing goes out.
+        if !dry {
+            s.audit_strict(
+                "push.start",
+                &caller.actor,
+                json!({"project": project, "channel": channel, "destination": d.name, "kind": d.kind,
+                       "address": rail::address(&d.kind, &d.config)}),
+            )?;
+        }
         let r = push_one(s, &project, &channel, protected, &d, dry, force);
         let (ok, value) = match r {
             Ok((v, keys, skipped, address, via)) => {
@@ -1749,11 +1760,11 @@ fn run_env(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
             }
         }
     }
-    s.audit(
+    s.audit_strict(
         "run",
         &caller.actor,
         json!({"project": project, "channel": channel, "keys": names}),
-    );
+    )?;
     Ok(json!({"env": env, "files": files}))
 }
 

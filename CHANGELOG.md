@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+Security hardening and public assurance.
+
+- Adding or changing a destination now always needs approval, on unprotected channels too.
+- Reveals, `pit run`, exports and pushes are refused if their audit-log entry cannot be written; a
+  push is logged before anything is sent.
+- The wrong-guess counter is also kept in the Keychain and in the agent's memory.
+- The agent caps request size and simultaneous connections.
+- `pit run`'s temporary folder is created exclusively; AI scan results no longer include value lengths.
+- `rustls` 0.23.46 (RUSTSEC-2026-0346 to -0349).
+- New: crypto test vectors (Wycheproof, RFC 9106), fuzz targets, cargo-deny policy, Security,
+  CodeQL, Scorecard, Assurance and Release workflows, threat model, OWASP ASVS self-assessment,
+  `unsafe` review, and a public assurance report.
+
 ## 0.1.0 — 2026-10-15
 
 First public release.

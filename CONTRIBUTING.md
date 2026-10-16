@@ -12,6 +12,10 @@ Thanks for helping. A few things matter more here than in most projects, because
   associated data.
 - **Comments say what code does and why**, not how it could be attacked.
 - Keep pushed secrets decryptable: anything that writes secrets keeps the `ops::guard_one_way` check.
+- **Every change comes with tests.** New behaviour gets a test that fails without it — a unit test, a
+  case in `tests/e2e.py`, or both; a bug fix gets a test that reproduces the bug. Code that reads
+  outside input (files, the socket, backups, bundles) also gets a fuzz target in `fuzz/`.
+- **New `unsafe` code** is listed and justified in [docs/assurance/unsafe.md](docs/assurance/unsafe.md).
 
 [AGENTS.md](AGENTS.md) has a map of the source.
 
@@ -19,7 +23,7 @@ Thanks for helping. A few things matter more here than in most projects, because
 
 ```sh
 cargo build
-cargo test                                   # unit tests
+cargo test                                   # unit tests and crypto test vectors
 pip install pexpect
 cargo build --release && PIT_BIN=target/release/pit python3 tests/e2e.py
 ```
@@ -31,8 +35,17 @@ Before sending a pull request:
 
 ```sh
 cargo fmt
-cargo clippy --release -- -D warnings
+cargo clippy --release --all-targets -- -D warnings
+cargo deny check && cargo audit                     # licenses, sources, advisories
 PIT=target/release/pit scripts/gen-commands-doc     # if you changed a command or its help
+```
+
+Optional, the same as CI's Assurance workflow:
+
+```sh
+cargo +nightly fuzz run sealed -- -max_total_time=60    # any target in fuzz/fuzz_targets
+cargo mutants --file src/crypto.rs                      # do the tests catch deliberate bugs?
+cargo llvm-cov --html                                   # coverage of the Rust tests
 ```
 
 ## Reporting bugs

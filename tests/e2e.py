@@ -33,6 +33,16 @@ def check(cond, msg):
     print(("PASS " if cond else "FAIL ") + msg)
     if not cond: sys.exit(1)
 
+def approved(args):
+    """Run a command that needs approval, answering with the password if asked."""
+    p = spawn(args)
+    if p.expect(["Password: ", pexpect.EOF]) == 0:
+        p.sendline(PW); p.expect(pexpect.EOF)
+    p.close()
+    if p.exitstatus != 0:
+        print("FAILED:", args, p.before); sys.exit(1)
+    return p.before
+
 # fresh
 subprocess.run([PIT, "lock"], env=env, capture_output=True)
 try:
@@ -96,9 +106,11 @@ check(r.returncode == 1, "one-way secret rejects wrong value")
 
 # 4. dotenv destination + push
 os.makedirs(os.path.join(OUT, "app"))
-r = sh(["dest", "add", "demo/development", "local", "--kind", "dotenv", "--set", f"path={OUT}/app/.env", "--select", "*", "--select", "!SIGNING_KEY"])
-check("one-way secrets it can never receive: ADMIN_PIN" in r.stderr, "adding a destination warns about one-way secrets it selects")
-sh(["dest", "add", "demo/development", "keys", "--kind", "files", "--set", f"dir={OUT}/app/keys", "--select", "SIGNING_KEY"])
+r = sh(["dest", "add", "demo/development", "local", "--kind", "dotenv", "--set", f"path={OUT}/app/.env"], ok=False)
+check(r.returncode != 0 and "approval required" in r.stderr, "adding a destination needs approval, even on an unprotected channel")
+out = approved(["dest", "add", "demo/development", "local", "--kind", "dotenv", "--set", f"path={OUT}/app/.env", "--select", "*", "--select", "!SIGNING_KEY"])
+check("one-way secrets it can never receive: ADMIN_PIN" in out, "adding a destination warns about one-way secrets it selects")
+approved(["dest", "add", "demo/development", "keys", "--kind", "files", "--set", f"dir={OUT}/app/keys", "--select", "SIGNING_KEY"])
 r = sh(["push", "demo/development", "--dry-run"])
 check(not os.path.exists(os.path.join(OUT, "app/.env")), "dry run writes nothing")
 r = sh(["push", "demo/development", "-y"])
@@ -119,7 +131,7 @@ check("updated API_KEY" in r.stdout, "absorb pulls changed value back")
 
 # 6. git guard
 gitdir = os.path.join(OUT, "repo"); os.makedirs(gitdir); subprocess.run(["git", "init", "-q", gitdir])
-sh(["dest", "add", "demo/development", "ingit", "--kind", "dotenv", "--set", f"path={gitdir}/.env"])
+approved(["dest", "add", "demo/development", "ingit", "--kind", "dotenv", "--set", f"path={gitdir}/.env"])
 r = sh(["push", "demo/development", "ingit", "-y"], ok=False)
 check("not ignored" in (r.stdout + r.stderr), "refuses to write an un-ignored file in a git repo")
 open(os.path.join(gitdir, ".gitignore"), "w").write(".env\n")
@@ -131,7 +143,7 @@ sh(["dest", "rm", "demo/development", "ingit"])
 sh(["dest", "add", "demo/production", "local", "--kind", "dotenv", "--set", f"path={OUT}/prod.env"], ok=False)
 p = spawn(["dest", "add", "demo/production", "local", "--kind", "dotenv", "--set", f"path={OUT}/prod.env"])
 p.expect("Password: "); p.sendline(PW); p.expect(pexpect.EOF)
-sh(["dest", "add", "demo/development", "sneaky", "--kind", "dotenv", "--set", f"path={OUT}/prod.env"])
+approved(["dest", "add", "demo/development", "sneaky", "--kind", "dotenv", "--set", f"path={OUT}/prod.env"])
 r = sh(["push", "demo/development", "sneaky", "-y"], ok=False)
 check("protected channel" in (r.stdout + r.stderr), "unprotected channel cannot push to a protected channel's address")
 sh(["dest", "rm", "demo/development", "sneaky"])
@@ -196,12 +208,12 @@ check(not leftover, "run cleans up its file folder")
 # 11b. review regressions: path guards, templates, declare
 os.symlink(HOME, os.path.join(OUT, "pitlink"))
 for bad in [f"{OUT}/pitlink/vault/header.json", f"{OUT}/app/../../{os.path.basename(SP)}/pit-home/vault/x.env" if False else f"{HOME}/../{os.path.basename(HOME)}/vault/x.env"]:
-    sh(["dest", "add", "demo/development", "bad", "--kind", "dotenv", "--set", f"path={bad}"])
+    approved(["dest", "add", "demo/development", "bad", "--kind", "dotenv", "--set", f"path={bad}"])
     r = sh(["push", "demo/development", "bad", "-y", "--force"], ok=False)
     check(r.returncode != 0 and "own folder" in (r.stdout + r.stderr), "destination cannot reach the vault via symlink or .. (" + bad.split("/")[-3] + ")")
     sh(["dest", "rm", "demo/development", "bad"])
 check(json.load(open(os.path.join(HOME, "vault/header.json")))["format"] == "the-pit/1", "vault header untouched")
-sh(["dest", "add", "demo/development", "leak", "--kind", "dotenv", "--set", f"path={OUT}/x-{{API_KEY}}.env"])
+approved(["dest", "add", "demo/development", "leak", "--kind", "dotenv", "--set", f"path={OUT}/x-{{API_KEY}}.env"])
 r = sh(["push", "demo/development", "leak", "--dry-run"], ok=False)
 check("plain secrets" in (r.stdout + r.stderr) and "rotated" not in (r.stdout + r.stderr), "destination settings refuse sealed secrets")
 sh(["dest", "rm", "demo/development", "leak"])

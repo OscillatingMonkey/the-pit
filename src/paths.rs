@@ -122,6 +122,13 @@ pub fn private_dir(p: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Create a fresh 0700 directory; fails if anything already exists at `p`.
+pub fn new_private_dir(p: &Path) -> Result<()> {
+    use std::os::unix::fs::DirBuilderExt;
+    fs::DirBuilder::new().mode(0o700).create(p)?;
+    Ok(())
+}
+
 pub fn ensure_layout() -> Result<()> {
     for d in [
         home(),
@@ -237,6 +244,8 @@ pub fn expand_tilde(s: &str) -> PathBuf {
 
 /// The executable's own path, for launchd and MCP configuration.
 pub fn self_exe() -> PathBuf {
+    // Only written into the user's own launchd/systemd/MCP config; never used to decide trust.
+    // nosemgrep: rust.lang.security.current-exe.current-exe
     std::env::current_exe().unwrap_or_else(|_| PathBuf::from("pit"))
 }
 

@@ -1,5 +1,13 @@
 # The Pit
 
+[![CI](https://github.com/OscillatingMonkey/the-pit/actions/workflows/ci.yml/badge.svg)](https://github.com/OscillatingMonkey/the-pit/actions/workflows/ci.yml)
+[![Security](https://github.com/OscillatingMonkey/the-pit/actions/workflows/security.yml/badge.svg)](https://github.com/OscillatingMonkey/the-pit/actions/workflows/security.yml)
+[![CodeQL](https://github.com/OscillatingMonkey/the-pit/actions/workflows/codeql.yml/badge.svg)](https://github.com/OscillatingMonkey/the-pit/actions/workflows/codeql.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/OscillatingMonkey/the-pit/badge)](https://scorecard.dev/viewer/?uri=github.com/OscillatingMonkey/the-pit)
+[![Coverage](https://img.shields.io/endpoint?url=https://oscillatingmonkey.github.io/the-pit/badges/coverage.json)](https://oscillatingmonkey.github.io/the-pit/)
+[![Mutation score](https://img.shields.io/endpoint?url=https://oscillatingmonkey.github.io/the-pit/badges/mutants.json)](https://oscillatingmonkey.github.io/the-pit/)
+[![Fuzzing](https://img.shields.io/endpoint?url=https://oscillatingmonkey.github.io/the-pit/badges/fuzzing.json)](https://oscillatingmonkey.github.io/the-pit/)
+
 **An encrypted secrets vault that lives on your machine, and an integration rail that pushes
 those secrets where they need to go — Fly, Vercel, GitHub Actions, local `.env` files, and more.**
 
@@ -220,6 +228,17 @@ pit service uninstall
 pit emergency destroy          # crypto-shreds the vault; cannot be undone
 brew uninstall the-pit         # or: cargo uninstall the-pit
 ```
+
+## Security assurance
+
+The Pit's claims are meant to be checked, not trusted. Every push runs advisory scans (RustSec, OSV),
+license and source checks, Semgrep and CodeQL; every week CI fuzzes every input parser, measures test
+coverage and mutation score, and publishes the results at
+**<https://oscillatingmonkey.github.io/the-pit/>**. The cryptography is tested against Project
+Wycheproof and RFC 9106 vectors, and there is a [STRIDE threat model](docs/assurance/threat-model.md),
+an [OWASP ASVS self-assessment](docs/assurance/asvs.md) and a review of every
+[`unsafe` block](docs/assurance/unsafe.md). Release binaries carry signed build provenance and an SBOM.
+Everything is listed, with how to reproduce it, in [docs/assurance](docs/assurance/README.md).
 
 ## Contributing and security
 

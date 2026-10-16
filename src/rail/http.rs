@@ -10,7 +10,7 @@ pub fn agent() -> ureq::Agent {
     ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(10))
         .timeout(Duration::from_secs(60))
-        .user_agent(concat!("the-pit/", env!("CARGO_PKG_VERSION")))
+        .user_agent("the-pit")
         .https_only(true)
         .redirects(0)
         .build()

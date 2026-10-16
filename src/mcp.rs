@@ -42,7 +42,7 @@ fn tools() -> Value {
             "dry_run": {"type": "boolean"}, "ticket": {"type": "string", "description": "An approved ticket from `pit approve`, when retrying"}}}},
         {"name": "pit_diff", "description": "Compare a channel with what each destination currently holds (names only).",
          "inputSchema": {"type": "object", "required": ["project", "channel"], "properties": pc}},
-        {"name": "pit_scan", "description": "Look through a project folder for secrets that should live in The Pit (.env files, hard-coded keys, key files). Returns names, file:line places, lengths and whether each is committed to git. Never values, and never changes anything; the person imports with `pit scan <folder>`.",
+        {"name": "pit_scan", "description": "Look through a project folder for secrets that should live in The Pit (.env files, hard-coded keys, key files). Returns names, file:line places and whether each is committed to git. Never values, and never changes anything; the person imports with `pit scan <folder>`.",
          "inputSchema": {"type": "object", "required": ["folder"], "properties": {"folder": {"type": "string"}, "all": {"type": "boolean", "description": "Include ordinary settings too"}}}},
         {"name": "pit_log", "description": "Recent audit log entries: pushes and where they went, reveals, unlocks.",
          "inputSchema": {"type": "object", "properties": {"project": {"type": "string"}, "event": {"type": "string"}, "limit": {"type": "integer"}}}}
@@ -89,7 +89,7 @@ fn call_tool(name: &str, args: &Value) -> Result<Value> {
                 .map(|f| {
                     json!({
                         "suggested_name": f.name, "what": f.what, "places": f.places,
-                        "length": f.value.len(), "committed_to_git": f.committed,
+                        "committed_to_git": f.committed,
                     })
                 })
                 .collect();
