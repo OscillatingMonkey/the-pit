@@ -70,11 +70,25 @@ for d in sorted(os.listdir(results)) if os.path.isdir(results) else []:
                 if f.endswith(".json"):
                     fuzz.append(json.load(open(os.path.join(root, f))))
 if fuzz:
-    total = sum(x["runs"] for x in fuzz)
-    crashed = [x["target"] for x in fuzz if not x["ok"]]
-    badge("fuzzing", "fuzzing", "crash found" if crashed else f"{total/1e6:.1f}M inputs, 0 crashes", "red" if crashed else "brightgreen")
-    items = "".join(f"<li><code>{html.escape(x['target'])}</code>: {x['runs']:,} inputs in {x['seconds']} s — {'no crashes' if x['ok'] else '<b>crash</b>'}</li>" for x in fuzz)
-    rows.append(("Fuzzing", f"{len(fuzz)} targets, {total:,} random inputs with AddressSanitizer — {'crashes in ' + ', '.join(crashed) if crashed else 'no crashes, hangs or memory errors'}", f"<ul>{items}</ul>", not crashed))
+    ran = [x for x in fuzz if x["runs"] > 0]
+    total = sum(x["runs"] for x in ran)
+    crashed = [x["target"] for x in ran if not x["ok"]]
+    broken = [x["target"] for x in fuzz if x["runs"] == 0]
+    if crashed:
+        badge("fuzzing", "fuzzing", "crash found", "red")
+    elif broken:
+        badge("fuzzing", "fuzzing", "incomplete", "lightgrey")
+    else:
+        badge("fuzzing", "fuzzing", f"{total/1e6:.1f}M inputs, 0 crashes", "brightgreen")
+
+    def line(x):
+        if x["runs"] == 0:
+            return f"<li><code>{html.escape(x['target'])}</code>: did not run (build or setup error — see the workflow log)</li>"
+        return f"<li><code>{html.escape(x['target'])}</code>: {x['runs']:,} inputs in {x['seconds']} s — {'no crashes' if x['ok'] else '<b>crash</b>'}</li>"
+
+    summary = f"{len(ran)} of {len(fuzz)} targets ran, {total:,} random inputs with AddressSanitizer — " + (
+        "crashes in " + ", ".join(crashed) if crashed else "no crashes, hangs or memory errors")
+    rows.append(("Fuzzing", summary, "<ul>" + "".join(line(x) for x in fuzz) + "</ul>", False if crashed else (None if broken else True)))
 else:
     badge("fuzzing", "fuzzing", "not run", "lightgrey")
     rows.append(("Fuzzing", "not available in this run", "", None))

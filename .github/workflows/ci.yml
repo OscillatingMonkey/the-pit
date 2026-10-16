@@ -28,7 +28,7 @@ jobs:
       - name: End-to-end tests (throwaway vault)
         run: |
           python3 -m venv .venv
-          .venv/bin/pip install --quiet pexpect==4.9.0
+          .venv/bin/pip install --quiet --require-hashes -r tests/requirements.txt
           PIT_BIN=target/release/pit .venv/bin/python tests/e2e.py
 
   linux:

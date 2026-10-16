@@ -44,6 +44,21 @@ fuzzing, advisories and the SBOM, rebuilt by CI.
 Gaps found by these reviews are tracked as public issues labelled
 [`assurance`](https://github.com/OscillatingMonkey/the-pit/issues?q=label%3Aassurance).
 
+## Reviewed findings
+
+Findings that were looked at and judged not to be problems, with the reason. Everything else a tool
+reports is fixed or tracked as an [`assurance` issue](https://github.com/OscillatingMonkey/the-pit/issues?q=label%3Aassurance).
+
+| Tool | Finding | Where | Decision |
+|---|---|---|---|
+| CodeQL | hard-coded cryptographic value (×3) | `crypto.rs` `Key::generate`, `random_bytes` | False positive: a zeroed buffer that is filled from the OS random generator before use. |
+| CodeQL | hard-coded cryptographic value | `crypto.rs` `Key::derive` | False positive: `the-pit/v1` is HKDF's public domain-separation salt (RFC 5869 §3.1); the secret input is the random vault key. |
+| CodeQL | hard-coded cryptographic value (×2) | `paths.rs` | False positive: directory permission bits (`0o700`). |
+| CodeQL | cleartext logging | `values.rs` `set` | False positive: an already-encrypted value moves into the secret's encrypted history; nothing is logged. |
+| Semgrep | `unsafe` usage (×22) | see [unsafe.md](unsafe.md) | Each block reviewed and justified there. |
+| Semgrep | `current_exe`, `temp_dir` | `paths.rs`, `cli.rs` | Reviewed: the executable path only goes into the user's own service config; the temporary folder has a 128-bit random name and is created exclusively with mode `0700`. Marked inline. |
+| cargo-mutants | 5 surviving mutants | `shamir.rs` `gf_inv`, `totp.rs` `hotp`, `verify` | Equivalent mutants: `\|` and `^` give the same result on non-overlapping bits, and the `\|\|`/`&&` swap in `verify` cannot change which codes are accepted. |
+
 ## Run them yourself
 
 ```sh

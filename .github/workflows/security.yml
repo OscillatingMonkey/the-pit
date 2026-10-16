@@ -70,15 +70,16 @@ jobs:
   semgrep:
     name: Static analysis (Semgrep)
     runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep:1.180.0@sha256:529ee8a277ec8adc5b534d7c74eea0a47e9de21d62852b6ba7ac6ba9566845c3
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install Semgrep
-        run: python3 -m pip install --quiet semgrep==1.180.0
       - name: semgrep scan
         # Every `unsafe` block is listed and reviewed in docs/assurance/unsafe.md instead
         # of being flagged one by one.
+        shell: sh
         run: |
           set +e
           semgrep scan --metrics=off --config p/rust --config p/secrets \

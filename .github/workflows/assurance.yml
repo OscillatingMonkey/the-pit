@@ -41,7 +41,7 @@ jobs:
           cargo llvm-cov clean --workspace
           cargo build --locked --release
           cargo test --locked --release
-          python3 -m venv .venv && .venv/bin/pip install --quiet pexpect==4.9.0
+          python3 -m venv .venv && .venv/bin/pip install --quiet --require-hashes -r tests/requirements.txt
           PIT_BIN="$CARGO_LLVM_COV_TARGET_DIR/release/pit" .venv/bin/python tests/e2e.py
           cargo llvm-cov report --release --html --output-dir out
           cargo llvm-cov report --release --json --summary-only --output-path out/summary.json
@@ -97,7 +97,7 @@ jobs:
       - name: Fuzz for 5 minutes with AddressSanitizer
         run: |
           set +e
-          cargo fuzz run ${{ matrix.target }} -- -max_total_time=300 -rss_limit_mb=2048 -print_final_stats=1 2>&1 | tee run.txt
+          cargo fuzz run --target x86_64-unknown-linux-gnu ${{ matrix.target }} -- -max_total_time=300 -rss_limit_mb=2048 -print_final_stats=1 2>&1 | tee run.txt
           status=${PIPESTATUS[0]}
           mkdir -p result
           runs=$(grep -oE 'stat::number_of_executed_units: *[0-9]+' run.txt | grep -oE '[0-9]+$' | tail -1)

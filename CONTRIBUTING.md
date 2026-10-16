@@ -24,7 +24,7 @@ Thanks for helping. A few things matter more here than in most projects, because
 ```sh
 cargo build
 cargo test                                   # unit tests and crypto test vectors
-pip install pexpect
+pip install --require-hashes -r tests/requirements.txt
 cargo build --release && PIT_BIN=target/release/pit python3 tests/e2e.py
 ```
 
