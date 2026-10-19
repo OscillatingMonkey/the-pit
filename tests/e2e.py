@@ -77,6 +77,9 @@ check(PW not in hdr and "tester" not in hdr, "header holds no password or owner 
 lib = open(os.path.join(HOME, "vault/library.sealed")).read()
 check("tester" not in lib, "library file is ciphertext")
 
+# Approval windows are tested on their own in 21f; elsewhere every approval is asked for.
+approved(["settings", "approval_window_secs", "0"])
+
 # 2. projects/channels/secrets
 sh(["project", "add", "demo", "-d", "Demo app", "--channels", "production,development"])
 sh(["set", "demo/development", "API_KEY", "-d", "The API key"], stdin="dev-value-123\n")
@@ -504,6 +507,28 @@ p.send("rev\t"); p.expect("reveal "); p.sendcontrol("u")
 p.send("reveal demo/devel\t"); p.expect("demo/development "); p.send("API_\t"); p.expect("API_KEY "); p.sendcontrol("u")
 check(True, "console Tab completes commands, scopes and secret names")
 p.sendline("exit"); p.expect(pexpect.EOF)
+
+# 21f. one approval covers a run of changes to the same channel from the same terminal
+approved(["settings", "approval_window_secs", "300"])
+r = sh(["set", "demo/production", "WIN_A", "--generate", "16"], ok=False)
+check(r.returncode != 0 and "approval" in r.stderr, "with no approval yet, a protected change asks")
+approved(["set", "demo/production", "WIN_A", "--generate", "16"])
+for n in ("WIN_B", "WIN_C", "WIN_D"):
+    sh(["set", "demo/production", n, "--generate", "16"])
+check(True, "after one approval, more changes to the same channel go ahead without asking again")
+r = sh(["push", "demo/production", "--dry-run"])
+check("WIN_D" in r.stdout, "a push preview never asks")
+r = sh(["set", "demo", "WIN_E", "--generate", "16"], ok=False)
+check(r.returncode != 0 and "approval" in r.stderr, "the approval does not cover another scope")
+r = sh(["reveal", "demo/production", "WIN_A"], ok=False)
+check(r.returncode != 0 and "approval" in r.stderr, "reveals are asked about every time")
+r = raw("secret.generate", {"scope": "demo/production", "name": "WIN_AI", "length": 16}, client="mcp")
+check(r.get("error", {}).get("code") == "approval_required", "AI clients are asked every time")
+r = sh(["log", "--event", "approval.window"])
+check("demo/production" in r.stdout, "the approval window is in the audit log")
+approved(["settings", "approval_window_secs", "0"])
+r = sh(["set", "demo/production", "WIN_F", "--generate", "16"], ok=False)
+check(r.returncode != 0 and "approval" in r.stderr, "approval_window_secs 0 asks every time again")
 
 # 22. destroy
 p = spawn(["emergency", "destroy"]); p.expect(r"Type (DESTROY [0-9a-f]+)"); phrase = p.match.group(1); p.sendline(phrase); p.expect("vault is gone"); p.expect(pexpect.EOF)

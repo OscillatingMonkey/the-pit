@@ -2064,6 +2064,11 @@ fn log(a: LogArgs) -> Result<()> {
                 d["destination"].as_str().unwrap_or(""),
                 d["address"].as_str().unwrap_or(""),
             ),
+            "approval.window" => format!(
+                "{} · changes from this terminal go ahead for {} min",
+                d["scope"].as_str().unwrap_or(""),
+                d["secs"].as_u64().unwrap_or(0) / 60
+            ),
             _ => d.to_string(),
         };
         println!(

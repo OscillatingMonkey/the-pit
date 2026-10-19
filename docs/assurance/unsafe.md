@@ -16,7 +16,7 @@ table in the same pull request.
 | `harden.rs` `peer` (Linux) | `getsockopt(SO_PEERCRED)` | Writes into a correctly sized, initialised `ucred` on the stack; length passed and checked by the kernel; result ignored on error. |
 | `harden.rs` `peer` (macOS/BSD) | `getpeereid`, `getsockopt(LOCAL_PEERPID)` | Out-parameters are initialised stack integers of the exact type; errors handled. |
 | `harden.rs` `process_path` | `proc_pidpath` | Buffer pointer and its true length are passed; only the returned `n ≤ len` bytes are read. |
-| `harden.rs` `parent_pid` | `proc_pidinfo(PROC_PIDTBSDINFO)` | Zeroed `proc_bsdinfo` (plain C struct, all-zero is valid); used only if the kernel filled exactly its size. |
+| `harden.rs` `bsd_info` (used by `parent_pid`, `start_time`) | `proc_pidinfo(PROC_PIDTBSDINFO)` | Zeroed `proc_bsdinfo` (plain C struct, all-zero is valid); used only if the kernel filled exactly its size. |
 | `agent.rs`, `paths.rs` ×4, `service.rs` | `getuid` | No arguments; cannot fail. |
 | `backup.rs` `SyncLock` | `flock(LOCK_EX / LOCK_UN)` | File descriptor owned by a live `File` for the lock's whole lifetime. |
 | `cli.rs` `run` | `signal(SIGINT/TERM/HUP/QUIT, handler)` | The handler is an empty `extern "C" fn` — async-signal-safe by construction. |

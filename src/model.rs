@@ -62,6 +62,14 @@ pub struct Settings {
     /// can invoke `pit run`; this keeps an unlocked session from being enough.
     #[serde(default = "yes")]
     pub run_needs_approval: bool,
+    /// After you approve a change, more changes to the same channel (or project)
+    /// from the same terminal go ahead without asking for this long. 0 = ask every time.
+    #[serde(default = "approval_window")]
+    pub approval_window_secs: u64,
+}
+
+fn approval_window() -> u64 {
+    5 * 60
 }
 
 impl Default for Settings {
@@ -74,6 +82,7 @@ impl Default for Settings {
             ai_push_needs_approval: true,
             clipboard_secs: 30,
             run_needs_approval: true,
+            approval_window_secs: approval_window(),
         }
     }
 }

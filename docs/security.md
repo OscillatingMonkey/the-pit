@@ -54,6 +54,13 @@ Every identity also gets an **X25519 key pair**, so bundles can be encrypted to 
 - **Throttling.** After 3 wrong passwords or codes — at unlock or at an approval — each further attempt
   waits exponentially longer (up to an hour), and 6 wrong approvals close the session. The count
   survives restarts and is kept in more than one place, so clearing one does not reset it.
+- **One approval per batch of changes.** After you approve a change, further changes to the same
+  channel (or project) from the same terminal tab — or the same app — go ahead without asking for 5
+  minutes, so editing 20 secrets and pushing them asks once. The window is tied to that terminal's
+  process and its start time, so other tabs, other apps and AI clients are still asked. Reveals,
+  `pit run`, removals, exports and settings are asked about every time. Each window is in `pit log`
+  (`approval.window`); `pit settings approval_window_secs 0` turns it off. Push previews (dry runs)
+  send nothing and never ask.
 - **Destinations need approval.** Adding or changing a destination — where values get sent — always
   asks for your approval, on any channel.
 - **No log entry, no value.** Reveals, `pit run`, exports and pushes are refused if their audit entry

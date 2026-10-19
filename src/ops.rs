@@ -153,6 +153,24 @@ fn channel_protected(lib: &Library, req: &Request) -> bool {
     scoped || from_pc
 }
 
+/// The scope one approval covers for a while (see `agent::Window`): the
+/// channel, project or global scope the request changes. `None` for requests
+/// that are asked about every time.
+pub fn window_scope(req: &Request) -> Option<String> {
+    let op = req.op.as_str();
+    if ALWAYS_APPROVE.contains(&op) || AI_REFUSED.contains(&op) || op == "approve" {
+        return None;
+    }
+    let sc = match (o(req, "project"), o(req, "channel")) {
+        (Some(p), Some(c)) => format!("{p}/{c}"),
+        _ => o(req, "scope").unwrap_or("").to_string(),
+    };
+    Some(match o(req, "to") {
+        Some(to) => format!("{sc} → {to}"),
+        None => sc,
+    })
+}
+
 fn describe(req: &Request) -> String {
     let pc = match (o(req, "project"), o(req, "channel")) {
         (Some(p), Some(c)) => format!("{p}/{c}"),
@@ -224,11 +242,10 @@ pub fn needs_approval(state: &Shared, caller: &Caller, req: &Request) -> Result<
     }
     let protected = channel_protected(lib, req);
     let need = match op {
+        // A dry run sends nothing and shows only names, so it never asks.
         "push" => {
-            protected
-                || (ai
-                    && lib.settings.ai_push_needs_approval
-                    && !b(req, "dry_run").unwrap_or(false))
+            !b(req, "dry_run").unwrap_or(false)
+                && (protected || (ai && lib.settings.ai_push_needs_approval))
         }
         "absorb" => (protected || ai) && !b(req, "dry_run").unwrap_or(false),
         "run.env" => protected || lib.settings.run_needs_approval,
@@ -711,6 +728,7 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
                 "clipboard_secs" => st.clipboard_secs = num()?.clamp(5, 600),
                 "ai_push_needs_approval" => st.ai_push_needs_approval = val == "true",
                 "run_needs_approval" => st.run_needs_approval = val == "true",
+                "approval_window_secs" => st.approval_window_secs = num()?.min(30 * 60),
                 _ => return invalid(format!("unknown setting {key}")),
             }
             s.save()?;

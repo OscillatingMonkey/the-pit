@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- Fewer approval prompts: one approval covers more changes to the same channel or project from the
+  same terminal tab (or app) for 5 minutes (`pit settings approval_window_secs`, 0 to turn off).
+  Reveals, `pit run`, removals, exports and settings still ask every time, and AI clients always ask.
+- A push preview (`--dry-run`, and the preview `pit push` shows before asking) no longer needs
+  approval, so a push to a protected channel asks once instead of twice.
+- On Linux, `pit log` now names the program that ran `pit`.
+
 ## 0.1.1 — 2026-10-15
 
 Security hardening, public assurance, and a friendlier console.

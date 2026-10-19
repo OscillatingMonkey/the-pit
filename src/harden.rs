@@ -110,6 +110,37 @@ pub fn process_path(pid: i32) -> String {
 /// Parent pid of a process (to name the program that ran `pit`).
 pub fn parent_pid(pid: i32) -> i32 {
     #[cfg(target_os = "macos")]
+    if let Some(info) = bsd_info(pid) {
+        return info.pbi_ppid as i32;
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(f) = proc_stat(pid) {
+        return f.first().and_then(|v| v.parse().ok()).unwrap_or(-1);
+    }
+    let _ = pid;
+    -1
+}
+
+/// When a process started, so a pid the system has since reused is not taken
+/// for the process that had it before.
+pub fn start_time(pid: i32) -> Option<u64> {
+    #[cfg(target_os = "macos")]
+    if let Some(info) = bsd_info(pid) {
+        return Some(info.pbi_start_tvsec * 1_000_000 + info.pbi_start_tvusec);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(f) = proc_stat(pid) {
+        return f.get(18).and_then(|v| v.parse().ok());
+    }
+    let _ = pid;
+    None
+}
+
+#[cfg(target_os = "macos")]
+fn bsd_info(pid: i32) -> Option<libc::proc_bsdinfo> {
+    if pid <= 0 {
+        return None;
+    }
     unsafe {
         let mut info: libc::proc_bsdinfo = std::mem::zeroed();
         let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
@@ -120,10 +151,14 @@ pub fn parent_pid(pid: i32) -> i32 {
             &mut info as *mut _ as *mut libc::c_void,
             size,
         );
-        if n == size {
-            return info.pbi_ppid as i32;
-        }
+        (n == size).then_some(info)
     }
-    let _ = pid;
-    -1
+}
+
+/// The fields of `/proc/PID/stat` after the program name, from the parent pid on.
+#[cfg(target_os = "linux")]
+fn proc_stat(pid: i32) -> Option<Vec<String>> {
+    let s = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let rest = &s[s.rfind(')')? + 1..];
+    Some(rest.split_whitespace().skip(1).map(String::from).collect())
 }

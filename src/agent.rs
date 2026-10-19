@@ -32,7 +32,20 @@ pub struct Session {
     pub expires: Instant,
     pub elevated_until: Option<Instant>,
     pub elevated_ai: bool,
+    /// Approvals a person gave recently, each covering one scope from one terminal.
+    pub windows: Vec<Window>,
 }
+
+/// After a person approves a change, more changes to the same scope from the
+/// same terminal (or the same app) go ahead without asking again until `until`.
+pub struct Window {
+    pub origin: Origin,
+    pub scope: String,
+    pub until: Instant,
+}
+
+/// The program a request came through: pid and start time.
+pub type Origin = (i32, u64);
 
 impl Session {
     pub fn save(&mut self) -> Result<()> {
@@ -69,6 +82,15 @@ impl Session {
             _ => false,
         }
     }
+
+    fn in_window(&self, origin: Origin, scope: &str) -> bool {
+        let now = Instant::now();
+        self.lib.settings.approval_window_secs > 0
+            && self
+                .windows
+                .iter()
+                .any(|w| w.origin == origin && w.scope == scope && now < w.until)
+    }
 }
 
 struct Pending {
@@ -96,6 +118,7 @@ pub type Shared = Arc<Mutex<State>>;
 pub struct Caller {
     pub client: String,
     pub actor: String,
+    pub origin: Option<Origin>,
 }
 
 /// Wrong answers at the approval gate after which the session is closed.
@@ -265,6 +288,7 @@ fn serve(stream: UnixStream, state: Shared, pid: i32) -> Result<()> {
                     req.client.clone()
                 },
                 actor: describe_peer(pid, &req.client),
+                origin: origin(pid),
             };
             let shutdown = req.op == "shutdown";
             let r = Response::from_result(handle(&state, &caller, req));
@@ -301,6 +325,32 @@ fn describe_peer(pid: i32, client: &str) -> String {
     } else {
         format!("{} ({} ← {})", client, short(&exe), short(&parent))
     }
+}
+
+/// Where a request comes from, for approval windows: the nearest program above
+/// `pit` that is not a shell — a terminal tab's login process, or the app that
+/// ran the command. A different tab or app has to be approved on its own.
+fn origin(pid: i32) -> Option<Origin> {
+    const SHELLS: &[&str] = &[
+        "sh", "bash", "zsh", "fish", "dash", "ksh", "tcsh", "csh", "nu",
+    ];
+    let mut p = harden::parent_pid(pid);
+    for _ in 0..16 {
+        if p <= 1 {
+            return None;
+        }
+        let path = harden::process_path(p);
+        let name = path
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .trim_start_matches('-');
+        if !SHELLS.contains(&name) {
+            return harden::start_time(p).map(|t| (p, t));
+        }
+        p = harden::parent_pid(p);
+    }
+    None
 }
 
 fn digest(req: &Request) -> String {
@@ -520,6 +570,7 @@ fn new_session(header: Header, keys: Keys, lib: Library, generation: u64) -> Ses
         expires: now + Duration::from_secs(secs),
         elevated_until: None,
         elevated_ai: false,
+        windows: vec![],
     }
 }
 
@@ -678,6 +729,13 @@ pub fn gate(
             {
                 return Ok(());
             }
+            if let (Some(o), Some(sc), Some(s)) =
+                (caller.origin, window_scope(caller, req), g.session.as_ref())
+            {
+                if s.in_window(o, &sc) {
+                    return Ok(());
+                }
+            }
             if let Some(t) = req.auth.as_ref().and_then(|a| a.ticket.as_ref()) {
                 if let Some(p) = g.pending.get(t) {
                     if p.approved && p.digest == d {
@@ -715,6 +773,9 @@ pub fn gate(
                 };
                 if ok {
                     throttle_reset();
+                    if !is_approve {
+                        open_window(s, caller, req);
+                    }
                     return Ok(());
                 }
                 throttle_fail();
@@ -747,6 +808,12 @@ pub fn gate(
             ""
         };
         if presence::confirm(&format!("{who}{reason}")).is_ok() {
+            if !is_approve {
+                let mut g = state.lock().unwrap_or_else(|p| p.into_inner());
+                if let Some(s) = g.session.as_mut() {
+                    open_window(s, caller, req);
+                }
+            }
             return Ok(());
         }
     }
@@ -779,6 +846,40 @@ pub fn gate(
         reason: reason.into(),
         methods,
     })
+}
+
+/// The scope an approval window would cover for this request, if any. AI
+/// clients never get one, and neither do requests that hand values back
+/// (reveal, `pit run`) or the always-asked actions (removals, exports,
+/// settings): each of those is approved on its own.
+fn window_scope(caller: &Caller, req: &Request) -> Option<String> {
+    if caller.client == "mcp" {
+        return None;
+    }
+    ops::window_scope(req)
+}
+
+fn open_window(s: &mut Session, caller: &Caller, req: &Request) {
+    let secs = s.lib.settings.approval_window_secs;
+    let (Some(origin), Some(scope)) = (caller.origin, window_scope(caller, req)) else {
+        return;
+    };
+    if secs == 0 {
+        return;
+    }
+    let now = Instant::now();
+    s.windows
+        .retain(|w| now < w.until && !(w.origin == origin && w.scope == scope));
+    s.windows.push(Window {
+        origin,
+        scope: scope.clone(),
+        until: now + Duration::from_secs(secs),
+    });
+    s.audit(
+        "approval.window",
+        &caller.actor,
+        json!({"scope": scope, "secs": secs}),
+    );
 }
 
 /// Back up after every change. The vault files are watched rather than hooked
