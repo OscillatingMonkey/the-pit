@@ -16,6 +16,7 @@ another project, read [docs/for-machines.md](docs/for-machines.md) instead.
 | `src/protocol.rs` | client ↔ agent JSON-lines protocol |
 | `src/rail/` | integration adapters: fly, vercel, github, local (dotenv/files), command |
 | `src/backup.rs`, `src/s3.rs` | snapshots, bundles, backup targets |
+| `src/share.rs` | sharing one secret with another vault: receive requests and shares (windows live in `agent::Session::inbox`) |
 | `src/importer.rs` | importing a folder laid out `project/environment/*.env` |
 | `src/scan.rs` | reading .env/JSON/YAML files for `pit import env`, and `pit scan`'s read-only detectors |
 | `src/cli.rs`, `src/console.rs`, `src/mcp.rs` | the three front ends |

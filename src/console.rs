@@ -1,12 +1,10 @@
 //! The interactive console: `pit` with no arguments. Every CLI command works
 //! here without the `pit` prefix, plus `use PROJECT/CHANNEL` to set a context.
-//! Console history is kept in memory only. Tab completes commands, flags, and
-//! project, channel, secret and destination names (never values).
+//! Console history is kept in memory only. Tab completes commands, flags, flag
+//! values and names from the vault (never values), and a greyed hint shows the
+//! rest of the word or what the command expects next (→ accepts it).
 
-use std::cell::RefCell;
-use std::time::{Duration, Instant};
-
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::Highlighter;
@@ -14,13 +12,12 @@ use rustyline::hint::Hinter;
 use rustyline::history::DefaultHistory;
 use rustyline::validate::Validator;
 use rustyline::{CompletionType, Config, Context, Editor, Helper};
-use serde_json::{json, Value};
+use serde_json::json;
 
 use crate::cli::{self, Cli};
+use crate::complete::{Engine, FILES};
 use crate::error::Result;
 use crate::{protocol, ui};
-
-const CONSOLE_WORDS: [&str; 4] = ["use", "help", "exit", "quit"];
 
 fn prompt(context: &Option<String>) -> String {
     let open = protocol::call("console", "status", json!({}), None)
@@ -44,11 +41,11 @@ pub fn run() -> Result<()> {
         .build();
     let mut rl: Editor<PitHelper, DefaultHistory> =
         Editor::with_config(config).map_err(|e| crate::error::Error::Invalid(e.to_string()))?;
-    rl.set_helper(Some(PitHelper::default()));
+    rl.set_helper(Some(PitHelper::new()));
     let mut context: Option<String> = None;
     loop {
         if let Some(h) = rl.helper_mut() {
-            h.context = context.clone();
+            h.engine.context = context.clone();
         }
         let line = match rl.readline(&prompt(&context)) {
             Ok(l) => l,
@@ -153,220 +150,40 @@ fn apply_context(words: &mut Vec<String>, ctx: &str) {
 }
 
 // ---------------------------------------------------------------------------
-// completion
-
-/// Names from the vault, fetched from the agent (names only) and kept briefly.
-#[derive(Default, Clone)]
-struct Names {
-    /// "global", "PROJECT" and "PROJECT/CHANNEL"
-    scopes: Vec<String>,
-    /// (scope, secret name) — scope as in `scopes`
-    secrets: Vec<(String, String)>,
-    /// (PROJECT/CHANNEL, destination name)
-    destinations: Vec<(String, String)>,
-    connections: Vec<String>,
-}
-
-fn names_from(tree: &Value) -> Names {
-    let mut n = Names {
-        scopes: vec!["global".into()],
-        ..Default::default()
-    };
-    let list = |v: &Value| -> Vec<String> {
-        v.as_array()
-            .map(|a| {
-                a.iter()
-                    .filter_map(|x| x["name"].as_str().map(String::from))
-                    .collect()
-            })
-            .unwrap_or_default()
-    };
-    for s in list(&tree["globals"]) {
-        n.secrets.push(("global".into(), s));
-    }
-    for c in list(&tree["connections"]) {
-        n.connections.push(c);
-    }
-    for p in tree["projects"].as_array().into_iter().flatten() {
-        let pname = p["name"].as_str().unwrap_or_default().to_string();
-        n.scopes.push(pname.clone());
-        for s in list(&p["secrets"]) {
-            n.secrets.push((pname.clone(), s));
-        }
-        for c in p["channels"].as_array().into_iter().flatten() {
-            let scope = format!("{pname}/{}", c["name"].as_str().unwrap_or_default());
-            n.scopes.push(scope.clone());
-            for s in list(&c["secrets"]) {
-                n.secrets.push((scope.clone(), s));
-            }
-            for d in list(&c["destinations"]) {
-                n.destinations.push((scope.clone(), d));
-            }
-        }
-    }
-    n
-}
+// completion and hints (see `complete`)
 
 #[derive(Default)]
 struct PitHelper {
-    context: Option<String>,
-    cache: RefCell<Option<(Instant, Names)>>,
+    engine: Engine,
 }
 
 impl PitHelper {
-    fn names(&self) -> Names {
-        let mut c = self.cache.borrow_mut();
-        if let Some((at, n)) = c.as_ref() {
-            if at.elapsed() < Duration::from_secs(5) {
-                return n.clone();
-            }
-        }
-        let n = protocol::call("console", "tree", json!({}), None)
-            .map(|t| names_from(&t))
-            .unwrap_or_default();
-        *c = Some((Instant::now(), n.clone()));
-        n
-    }
-
-    /// Secret names visible from `scope`: its own, its project's (for a channel), and globals.
-    fn secrets_in(&self, names: &Names, scope: &str) -> Vec<String> {
-        let project = scope.split('/').next().unwrap_or(scope);
-        let mut out: Vec<String> = names
-            .secrets
-            .iter()
-            .filter(|(s, _)| s == scope || s == project || s == "global")
-            .map(|(_, n)| n.clone())
-            .collect();
-        out.sort();
-        out.dedup();
-        out
-    }
-
-    fn candidates(&self, before: &[&str], partial: &str) -> Vec<String> {
-        if before.is_empty() {
-            let mut all = cli::command_names();
-            all.extend(CONSOLE_WORDS.iter().map(|s| s.to_string()));
-            return all;
-        }
-        if before[0] == "help" || before[0] == "?" {
-            return if before.len() == 1 {
-                cli::command_names()
-            } else {
-                subcommands_at(&before[1..])
-            };
-        }
-        if before[0] == "use" {
-            return if before.len() == 1 {
-                self.names().scopes
-            } else {
-                vec![]
-            };
-        }
-        // Walk down the command tree as far as the typed words go.
-        let mut cmd = Cli::command();
-        let mut depth = 0;
-        while depth < before.len() {
-            let w = before[depth];
-            let next = cmd
-                .get_subcommands()
-                .find(|c| c.get_name() == w || c.get_all_aliases().any(|a| a == w))
-                .cloned();
-            match next {
-                Some(sub) => {
-                    cmd = sub;
-                    depth += 1;
-                }
-                None => break,
-            }
-        }
-        if depth == 0 {
-            return vec![];
-        }
-        if partial.starts_with('-') {
-            return cmd
-                .get_arguments()
-                .filter_map(|a| a.get_long().map(|l| format!("--{l}")))
-                .chain(["--help".to_string()])
-                .collect();
-        }
-        if cmd.has_subcommands() && depth == before.len() {
-            return cmd
-                .get_subcommands()
-                .map(|c| c.get_name().to_string())
-                .collect();
-        }
-        // Positional values: a scope first, then names within it.
-        let names = self.names();
-        let typed: Vec<&str> = before[depth..]
-            .iter()
-            .copied()
-            .filter(|w| !w.starts_with('-'))
-            .collect();
-        let top = before[0];
-        if top == "connect" || top == "disconnect" {
-            return names.connections;
-        }
-        let scope = typed
-            .iter()
-            .find(|w| names.scopes.iter().any(|s| s == *w))
-            .map(|s| s.to_string())
-            .or_else(|| self.context.clone());
-        match (typed.len(), scope) {
-            (0, Some(ctx)) if self.context.is_some() => {
-                // With a context set, the scope may be left out.
-                let mut v = names.scopes.clone();
-                v.extend(self.secrets_in(&names, &ctx));
-                if top == "dest" {
-                    v.extend(
-                        names
-                            .destinations
-                            .iter()
-                            .filter(|(s, _)| *s == ctx)
-                            .map(|(_, d)| d.clone()),
-                    );
-                }
-                v
-            }
-            (0, _) => names.scopes,
-            (_, Some(scope)) if top == "dest" => names
-                .destinations
-                .iter()
-                .filter(|(s, _)| *s == scope)
-                .map(|(_, d)| d.clone())
-                .collect(),
-            (_, Some(scope)) => {
-                let mut v = self.secrets_in(&names, &scope);
-                if top == "push" {
-                    v = names
-                        .destinations
-                        .iter()
-                        .filter(|(s, _)| *s == scope)
-                        .map(|(_, d)| d.clone())
-                        .collect();
-                }
-                v
-            }
-            _ => vec![],
+    fn new() -> Self {
+        PitHelper {
+            engine: Engine::console(),
         }
     }
 }
 
-/// Subcommand names under a path of command words (for `help backup <Tab>`).
-fn subcommands_at(path: &[&str]) -> Vec<String> {
-    let mut cmd = Cli::command();
-    for w in path {
-        let next = cmd
-            .get_subcommands()
-            .find(|c| c.get_name() == *w || c.get_all_aliases().any(|a| a == *w))
-            .cloned();
-        match next {
-            Some(sub) => cmd = sub,
-            None => return vec![],
+/// File names in the folder being typed, for arguments that take a path.
+fn files(partial: &str) -> Vec<String> {
+    let (dir, prefix) = match partial.rfind('/') {
+        Some(i) => (&partial[..=i], &partial[i + 1..]),
+        None => ("", partial),
+    };
+    let read = if dir.is_empty() { "." } else { dir };
+    let mut out = vec![];
+    if let Ok(entries) = std::fs::read_dir(read) {
+        for e in entries.flatten() {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(prefix) || (name.starts_with('.') && !prefix.starts_with('.')) {
+                continue;
+            }
+            let slash = if e.path().is_dir() { "/" } else { "" };
+            out.push(format!("{dir}{name}{slash}"));
         }
     }
-    cmd.get_subcommands()
-        .map(|c| c.get_name().to_string())
-        .collect()
+    out
 }
 
 impl Completer for PitHelper {
@@ -382,103 +199,84 @@ impl Completer for PitHelper {
         let start = head.rfind(char::is_whitespace).map(|i| i + 1).unwrap_or(0);
         let partial = &head[start..];
         let before: Vec<&str> = head[..start].split_whitespace().collect();
-        let mut matches: Vec<String> = self
-            .candidates(&before, partial)
-            .into_iter()
-            .filter(|c| c.starts_with(partial))
-            .collect();
-        matches.sort();
-        matches.dedup();
-        Ok((
-            start,
-            matches
-                .into_iter()
-                .map(|m| Pair {
-                    display: m.clone(),
-                    replacement: if m.ends_with('/') { m } else { format!("{m} ") },
-                })
-                .collect(),
-        ))
+        let mut pairs = vec![];
+        for c in self.engine.candidates(&before, partial) {
+            if c.value == FILES {
+                for f in files(partial) {
+                    let replacement = if f.ends_with('/') {
+                        f.clone()
+                    } else {
+                        format!("{f} ")
+                    };
+                    pairs.push(Pair {
+                        display: f,
+                        replacement,
+                    });
+                }
+                continue;
+            }
+            let display = if c.help.is_empty() {
+                c.value.clone()
+            } else {
+                format!("{:<28} {}", c.value, c.help)
+            };
+            let replacement = if c.value.ends_with('/') {
+                c.value
+            } else {
+                format!("{} ", c.value)
+            };
+            pairs.push(Pair {
+                display,
+                replacement,
+            });
+        }
+        Ok((start, pairs))
+    }
+}
+
+/// Shown greyed after the cursor; → or End accepts the part that completes the word.
+pub struct Hint {
+    shown: String,
+    insert: String,
+}
+
+impl rustyline::hint::Hint for Hint {
+    fn display(&self) -> &str {
+        &self.shown
+    }
+    fn completion(&self) -> Option<&str> {
+        (!self.insert.is_empty()).then_some(self.insert.as_str())
     }
 }
 
 impl Hinter for PitHelper {
-    type Hint = String;
+    type Hint = Hint;
+
+    fn hint(&self, line: &str, pos: usize, _ctx: &Context<'_>) -> Option<Hint> {
+        if pos < line.len() {
+            return None;
+        }
+        let (shown, insert) = self.engine.hint(line)?;
+        let shown = if insert.is_empty() {
+            format!("  {shown}")
+        } else {
+            shown
+        };
+        Some(Hint { shown, insert })
+    }
 }
-impl Highlighter for PitHelper {}
+
+impl Highlighter for PitHelper {
+    fn highlight_hint<'h>(&self, hint: &'h str) -> std::borrow::Cow<'h, str> {
+        std::borrow::Cow::Owned(ui::dim(hint))
+    }
+}
 impl Validator for PitHelper {}
 impl Helper for PitHelper {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn helper() -> PitHelper {
-        let tree = json!({
-            "globals": [{"name": "SHARED_TOKEN"}],
-            "connections": [{"name": "vercel-main"}],
-            "projects": [{
-                "name": "myapp",
-                "secrets": [{"name": "PROJECT_KEY"}],
-                "channels": [
-                    {"name": "production", "secrets": [{"name": "STRIPE_KEY"}], "destinations": [{"name": "web"}]},
-                    {"name": "development", "secrets": [{"name": "DEV_ONLY"}], "destinations": []}
-                ]
-            }]
-        });
-        let h = PitHelper::default();
-        *h.cache.borrow_mut() = Some((Instant::now(), names_from(&tree)));
-        h
-    }
-
-    fn complete(h: &PitHelper, line: &str) -> Vec<String> {
-        let before: Vec<&str> = line[..line.rfind(' ').map(|i| i + 1).unwrap_or(0)]
-            .split_whitespace()
-            .collect();
-        let partial = &line[line.rfind(' ').map(|i| i + 1).unwrap_or(0)..];
-        let mut v: Vec<String> = h
-            .candidates(&before, partial)
-            .into_iter()
-            .filter(|c| c.starts_with(partial))
-            .collect();
-        v.sort();
-        v.dedup();
-        v
-    }
-
-    #[test]
-    fn completes_commands_aliases_and_console_words() {
-        let h = helper();
-        assert!(complete(&h, "rev").contains(&"reveal".to_string()));
-        assert!(complete(&h, "vi").contains(&"view".to_string()));
-        assert!(complete(&h, "us").contains(&"use".to_string()));
-        assert_eq!(complete(&h, "backup li"), vec!["list"]);
-    }
-
-    #[test]
-    fn completes_scopes_then_secrets_in_scope() {
-        let h = helper();
-        assert_eq!(complete(&h, "reveal myapp/p"), vec!["myapp/production"]);
-        assert_eq!(
-            complete(&h, "reveal myapp/production "),
-            vec!["PROJECT_KEY", "SHARED_TOKEN", "STRIPE_KEY"]
-        );
-        assert!(!complete(&h, "reveal myapp/production ").contains(&"DEV_ONLY".to_string()));
-        assert_eq!(complete(&h, "push myapp/production "), vec!["web"]);
-        assert_eq!(
-            complete(&h, "use my"),
-            vec!["myapp", "myapp/development", "myapp/production"]
-        );
-    }
-
-    #[test]
-    fn completes_flags_and_uses_context() {
-        let mut h = helper();
-        assert!(complete(&h, "reveal --").contains(&"--copy".to_string()));
-        h.context = Some("myapp/development".into());
-        let v = complete(&h, "reveal D");
-        assert_eq!(v, vec!["DEV_ONLY"]);
-    }
 
     #[test]
     fn unknown_command_help_points_to_reveal() {
@@ -487,5 +285,12 @@ mod tests {
         let s = cli::unknown_command_help("display", "");
         assert!(s.contains("Did you mean `reveal`"), "{s}");
         assert!(s.contains("reveal PROJECT/CHANNEL NAME"));
+    }
+
+    #[test]
+    fn context_fills_in_the_scope() {
+        let mut w: Vec<String> = ["reveal", "KEY"].iter().map(|s| s.to_string()).collect();
+        apply_context(&mut w, "myapp/production/eu");
+        assert_eq!(w, vec!["reveal", "myapp/production/eu", "KEY"]);
     }
 }

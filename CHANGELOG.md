@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Channels nest, as deep as you like: `pit channel add myapp/production/eu/fra` (missing channels
+  above it are created). A channel sees its own secrets, then those of each channel above it up to
+  the project, the nearest one winning; `--no-inherit` cuts that chain. Channels inside a protected
+  channel are protected. `pit ls` shows the tree; renaming moves what is inside; removing a channel
+  that holds others needs `--recursive`. Existing vaults, backups and bundles need no change.
+- Completion everywhere: Tab in the console and in zsh, bash and fish (`pit completions SHELL`)
+  completes commands, flags, flag values and names from the vault, each with a description; the
+  console shows a greyed hint of the rest of the word or what comes next. Every option now has help
+  text.
+- Names `.` and `..` are refused for projects and channels.
+- Share a secret with someone else's vault: they run `pit receive`, you run
+  `pit share PROJECT/CHANNEL NAME --to PIT-RQ-…`, they save it with `pit receive PIT-SH-… --into …`.
+  The value is encrypted end to end and neither person sees it; a share opens only in the recipient's
+  vault, once, while their receive window is open (15 minutes by default; locking closes it). Sharing
+  always asks for approval; the first exchange with someone asks you to compare identity keys
+  (`pit contacts`). See [docs/sharing.md](docs/sharing.md).
 - Fewer approval prompts: one approval covers more changes to the same channel or project from the
   same terminal tab (or app) for 5 minutes (`pit settings approval_window_secs`, 0 to turn off).
   Reveals, `pit run`, removals, exports and settings still ask every time, and AI clients always ask.

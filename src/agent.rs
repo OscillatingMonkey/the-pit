@@ -34,6 +34,22 @@ pub struct Session {
     pub elevated_ai: bool,
     /// Approvals a person gave recently, each covering one scope from one terminal.
     pub windows: Vec<Window>,
+    /// Open receive windows for shared secrets. Their keys exist only here, so
+    /// a window that closes — or a session that ends — takes its key with it.
+    pub inbox: Vec<Inbox>,
+}
+
+/// One receive window (see `share`): a key pair for one incoming secret.
+pub struct Inbox {
+    pub key: crypto_box::SecretKey,
+    pub until: Instant,
+    pub expires: i64,
+}
+
+impl Inbox {
+    pub fn id(&self) -> String {
+        hex::encode(&self.key.public_key().as_bytes()[..4])
+    }
 }
 
 /// After a person approves a change, more changes to the same scope from the
@@ -229,6 +245,10 @@ pub fn run(foreground: bool) -> Result<()> {
                     s.audit("lock", "agent", json!({"reason": "timeout"}));
                 }
             }
+            if let Some(s) = g.session.as_mut() {
+                let now = Instant::now();
+                s.inbox.retain(|w| now < w.until);
+            }
             g.pending
                 .retain(|_, p| p.created.elapsed() < Duration::from_secs(300));
             if !paths::socket_path().exists() {
@@ -368,11 +388,34 @@ const OPEN_OPS: &[&str] = &[
     "approvals",
 ];
 
+/// What shell and console completion may ask for: names, never values.
+const COMPLETE_OPS: &[&str] = &[
+    "ping",
+    "status",
+    "tree",
+    "approvals",
+    "contact.list",
+    "share.pending",
+    "settings.get",
+];
+
 fn handle(state: &Shared, caller: &Caller, req: Request) -> Result<Value> {
+    let completing = caller.client == "complete";
+    if completing && !COMPLETE_OPS.contains(&req.op.as_str()) {
+        return Err(Error::Refused(format!(
+            "`{}` is not available to completion",
+            req.op
+        )));
+    }
     if !OPEN_OPS.contains(&req.op.as_str()) {
         let mut g = state.lock().unwrap_or_else(|p| p.into_inner());
         match g.session.as_mut() {
-            Some(s) if !s.expired() => s.last = Instant::now(),
+            // Pressing Tab is not using the pit: it does not hold off the idle lock.
+            Some(s) if !s.expired() => {
+                if !completing {
+                    s.last = Instant::now()
+                }
+            }
             Some(_) => {
                 if let Some(s) = g.session.take() {
                     s.audit("lock", "agent", json!({"reason": "timeout"}));
@@ -529,6 +572,7 @@ fn init(state: &Shared, caller: &Caller, req: &Request) -> Result<Value> {
         globals: Default::default(),
         projects: Default::default(),
         connections: Default::default(),
+        contacts: Default::default(),
         mfa: crate::model::Mfa {
             touch_id,
             totp_secret: None,
@@ -571,6 +615,7 @@ fn new_session(header: Header, keys: Keys, lib: Library, generation: u64) -> Ses
         elevated_until: None,
         elevated_ai: false,
         windows: vec![],
+        inbox: vec![],
     }
 }
 

@@ -53,7 +53,10 @@ Commands:
   quick-unlock  Touch ID quick unlock on this Mac (on|off)
   settings      Show or change settings (session length, idle lock, …)
   history       Earlier versions of the whole library, and restoring one
-  identity      Your identity key, for receiving bundles from someone else
+  identity      Your identity key, for receiving bundles and shared secrets from someone else
+  share         Share one secret with someone's vault. It travels encrypted; nobody sees the value
+  receive       Receive a shared secret: open a receive window, or save a share into your vault
+  contacts      People you have shared secrets with, and their identity keys
   emergency     Last resort: dump everything out, or destroy the vault
   import        Import secrets: a .env/JSON/YAML file, or a folder of them
   scan          Look through a project for secrets and offer to copy them in. Never edits the
@@ -64,6 +67,8 @@ Commands:
   mcp-config    Print the MCP configuration for Claude Code and other clients
   agent         Run the agent in the foreground
   console       Open the interactive console
+  completions   Print Tab completion for your shell: eval "$(pit completions zsh)" (or bash; fish: |
+                source)
 
 Options:
   -h, --help
@@ -81,7 +86,7 @@ Create your vault: password, recovery code, second factor
 Usage: pit init [OPTIONS]
 
 Options:
-      --name <NAME>  
+      --name <NAME>  Your name, shown to people you share secrets with
       --no-touch-id  Do not require Touch ID as a second factor
   -h, --help         Print help
 ```
@@ -142,7 +147,7 @@ Approve a pending request (from an AI client or another terminal)
 Usage: pit approve [TICKET]
 
 Arguments:
-  [TICKET]  
+  [TICKET]  The ticket to approve (from `pit approvals`); omitted, the oldest
 
 Options:
   -h, --help  Print help
@@ -167,7 +172,7 @@ Show projects, channels, secrets (names and fingerprints only) and destinations
 Usage: pit ls [TARGET]
 
 Arguments:
-  [TARGET]  
+  [TARGET]  Only this project or PROJECT/CHANNEL[/CHANNEL…]
 
 Options:
   -h, --help  Print help
@@ -181,7 +186,7 @@ Secrets that are declared but still empty
 Usage: pit needs [PROJECT]
 
 Arguments:
-  [PROJECT]  
+  [PROJECT]  Only this project
 
 Options:
   -h, --help  Print help
@@ -195,10 +200,10 @@ Manage projects
 Usage: pit project <COMMAND>
 
 Commands:
-  add   
-  list  
-  edit  
-  rm    
+  add   Create a project
+  list  List projects
+  edit  Rename a project or change its description
+  rm    Delete a project with all its channels and secrets
 
 Options:
   -h, --help  Print help
@@ -207,13 +212,15 @@ Options:
 ### pit project add
 
 ```
+Create a project
+
 Usage: pit project add [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>  The new project's name
 
 Options:
-  -d, --description <DESCRIPTION>  
+  -d, --description <DESCRIPTION>  What it is for (shown in listings and to AI assistants)
       --channels <CHANNELS>        Channels to create, e.g. production,staging,development
   -h, --help                       Print help
 ```
@@ -221,6 +228,8 @@ Options:
 ### pit project list
 
 ```
+List projects
+
 Usage: pit project list
 
 Options:
@@ -230,24 +239,28 @@ Options:
 ### pit project edit
 
 ```
+Rename a project or change its description
+
 Usage: pit project edit [OPTIONS] <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>  The project to change
 
 Options:
-      --rename <RENAME>            
-  -d, --description <DESCRIPTION>  
+      --rename <RENAME>            Its new name
+  -d, --description <DESCRIPTION>  What it is for (shown in listings and to AI assistants)
   -h, --help                       Print help
 ```
 
 ### pit project rm
 
 ```
+Delete a project with all its channels and secrets
+
 Usage: pit project rm <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>  The project to delete, with all its channels and secrets
 
 Options:
   -h, --help  Print help
@@ -261,9 +274,9 @@ Manage channels (production, staging, development, …)
 Usage: pit channel <COMMAND>
 
 Commands:
-  add   pit channel add PROJECT/NAME
-  edit  
-  rm    
+  add   Add a channel. Channels nest: PROJECT/production/eu/fra (missing parents are created)
+  edit  Change a channel's description, protection, inheritance or name
+  rm    Delete a channel and its secrets
 
 Options:
   -h, --help  Print help
@@ -272,49 +285,56 @@ Options:
 ### pit channel add
 
 ```
-pit channel add PROJECT/NAME
+Add a channel. Channels nest: PROJECT/production/eu/fra (missing parents are created)
 
 Usage: pit channel add [OPTIONS] <TARGET>
 
 Arguments:
-  <TARGET>  
+  <TARGET>  PROJECT/CHANNEL, or PROJECT/CHANNEL/CHANNEL/… for a channel inside another
 
 Options:
-  -d, --description <DESCRIPTION>  
+  -d, --description <DESCRIPTION>  What this channel is for
       --protected                  Require approval for every push and reveal (default for
-                                   `production`)
-      --unprotected                
-      --no-inherit                 Do not see the project's own secrets
+                                   `production`). Channels inside a protected channel are always
+                                   protected
+      --unprotected                Do not protect it, even if it is named `production`
+      --no-inherit                 Do not see the secrets of the channel (or project) it sits in
   -h, --help                       Print help
 ```
 
 ### pit channel edit
 
 ```
+Change a channel's description, protection, inheritance or name
+
 Usage: pit channel edit [OPTIONS] <TARGET>
 
 Arguments:
-  <TARGET>  
+  <TARGET>  PROJECT/CHANNEL[/CHANNEL…]
 
 Options:
-  -d, --description <DESCRIPTION>  
-      --protected                  
-      --unprotected                
-      --inherit <INHERIT>          [possible values: true, false]
-      --rename <RENAME>            
+  -d, --description <DESCRIPTION>  What this channel is for
+      --protected                  Require approval for every push and reveal
+      --unprotected                Stop requiring approval (not possible inside a protected channel)
+      --inherit <INHERIT>          See the secrets of the channel (or project) it sits in: true or
+                                   false [possible values: true, false]
+      --rename <RENAME>            New last part of its name; channels inside it move along
   -h, --help                       Print help
 ```
 
 ### pit channel rm
 
 ```
-Usage: pit channel rm <TARGET>
+Delete a channel and its secrets
+
+Usage: pit channel rm [OPTIONS] <TARGET>
 
 Arguments:
-  <TARGET>  
+  <TARGET>  PROJECT/CHANNEL[/CHANNEL…]
 
 Options:
-  -h, --help  Print help
+      --recursive  Also delete every channel inside it
+  -h, --help       Print help
 ```
 
 ## pit set
@@ -325,16 +345,41 @@ Set a secret's value (prompted, piped, from a file, or generated)
 Usage: pit set [OPTIONS] [ARGS]...
 
 Arguments:
-  [ARGS]...  [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL (defaults to .pit.toml)
+  [ARGS]...
+          [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL (defaults to .pit.toml)
 
 Options:
-      --file <FILE>                Read the value from a file (stored as a file secret)
-      --generate <GENERATE>        Generate a random value of this length
-      --charset <CHARSET>          Alphabet for --generate: base64url (default), alnum, hex, symbols
-  -d, --description <DESCRIPTION>  
-  -p, --protection <PROTECTION>    sealed (two-way, default) | hashed (one-way) | plain
-      --tag <TAG>                  
-  -h, --help                       Print help
+      --file <FILE>
+          Read the value from a file (stored as a file secret)
+
+      --generate <GENERATE>
+          Generate a random value of this length
+
+      --charset <CHARSET>
+          Alphabet for --generate: base64url (default), alnum, hex, symbols
+
+          Possible values:
+          - base64url: letters, digits, - and _ (default)
+          - alnum:     letters and digits
+          - hex:       0-9 a-f
+          - symbols:   letters, digits and punctuation
+
+  -d, --description <DESCRIPTION>
+          What it is for (shown in listings and to AI assistants)
+
+  -p, --protection <PROTECTION>
+          sealed (two-way, default) | hashed (one-way) | plain
+
+          Possible values:
+          - sealed: two-way: encrypted, pushable, revealable with approval (default)
+          - hashed: one-way: only verifiable, never pushed or revealed
+          - plain:  not sensitive: readable whenever the pit is open
+
+      --tag <TAG>
+          Tags (comma-separated), for choosing secrets by tag
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit declare
@@ -345,13 +390,27 @@ Declare a secret with no value yet
 Usage: pit declare [OPTIONS] [ARGS]...
 
 Arguments:
-  [ARGS]...  
+  [ARGS]...
+          [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to
+          .pit.toml)
 
 Options:
-  -d, --description <DESCRIPTION>  
-  -p, --protection <PROTECTION>    
-      --tag <TAG>                  
-  -h, --help                       Print help
+  -d, --description <DESCRIPTION>
+          What it is for (shown in listings and to AI assistants)
+
+  -p, --protection <PROTECTION>
+          sealed (two-way, default) | hashed (one-way) | plain
+
+          Possible values:
+          - sealed: two-way: encrypted, pushable, revealable with approval (default)
+          - hashed: one-way: only verifiable, never pushed or revealed
+          - plain:  not sensitive: readable whenever the pit is open
+
+      --tag <TAG>
+          Tags (comma-separated), for choosing secrets by tag
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit describe
@@ -376,14 +435,30 @@ Rename, re-tag or change how a secret is protected
 Usage: pit edit [OPTIONS] [ARGS]...
 
 Arguments:
-  [ARGS]...  
+  [ARGS]...
+          [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to
+          .pit.toml)
 
 Options:
-      --rename <RENAME>            
-  -p, --protection <PROTECTION>    
-      --tags <TAGS>                
-  -d, --description <DESCRIPTION>  
-  -h, --help                       Print help
+      --rename <RENAME>
+          Its new name
+
+  -p, --protection <PROTECTION>
+          sealed (two-way, default) | hashed (one-way) | plain
+
+          Possible values:
+          - sealed: two-way: encrypted, pushable, revealable with approval (default)
+          - hashed: one-way: only verifiable, never pushed or revealed
+          - plain:  not sensitive: readable whenever the pit is open
+
+      --tags <TAGS>
+          Replace its tags (comma-separated)
+
+  -d, --description <DESCRIPTION>
+          What it is for (shown in listings and to AI assistants)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit rm
@@ -394,7 +469,8 @@ Delete a secret
 Usage: pit rm [ARGS]...
 
 Arguments:
-  [ARGS]...  
+  [ARGS]...  [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to
+             .pit.toml)
 
 Options:
   -h, --help  Print help
@@ -408,7 +484,7 @@ Move a secret to another scope (global, a project, or project/channel)
 Usage: pit mv [ARGS] [ARGS]...
 
 Arguments:
-  [ARGS] [ARGS]...  
+  [ARGS] [ARGS]...  [SCOPE] NAME TO — move NAME from SCOPE (or the linked channel) to TO
 
 Options:
   -h, --help  Print help
@@ -422,7 +498,8 @@ Show a secret's value (needs approval)
 Usage: pit reveal [OPTIONS] [ARGS]...
 
 Arguments:
-  [ARGS]...  
+  [ARGS]...  [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to
+             .pit.toml)
 
 Options:
       --copy       Copy to the clipboard (cleared automatically) instead of printing
@@ -438,7 +515,8 @@ Check a candidate value against a secret without revealing it (works for one-way
 Usage: pit verify [ARGS]...
 
 Arguments:
-  [ARGS]...  
+  [ARGS]...  [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to
+             .pit.toml)
 
 Options:
   -h, --help  Print help
@@ -452,7 +530,8 @@ Put a secret's previous value back
 Usage: pit rollback [ARGS]...
 
 Arguments:
-  [ARGS]...  
+  [ARGS]...  [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to
+             .pit.toml)
 
 Options:
   -h, --help  Print help
@@ -467,9 +546,9 @@ Usage: pit dest <COMMAND>
 
 Commands:
   add    pit dest add PROJECT/CHANNEL NAME --kind fly --set app=my-app
-  edit   
-  rm     
-  list   
+  edit   Change a destination: kind, settings, selection, connection
+  rm     Remove a destination
+  list   List destinations
   kinds  What each kind of destination takes
 
 Options:
@@ -484,48 +563,92 @@ pit dest add PROJECT/CHANNEL NAME --kind fly --set app=my-app
 Usage: pit dest add [OPTIONS] <TARGET> <NAME>
 
 Arguments:
-  <TARGET>  
-  <NAME>    
+  <TARGET>
+          PROJECT/CHANNEL[/CHANNEL…] the destination belongs to
+
+  <NAME>
+          The destination's name
 
 Options:
-      --kind <KIND>                
-      --set <SETS>                 key=value (repeatable). Values may reference channel secrets as
-                                   {NAME}
-      --select <SELECT>            Which secrets: *, tag:<t>, NAME, "NAME as ALIAS", global:NAME,
-                                   !NAME (repeatable)
-      --connection <CONNECTION>    
-  -d, --description <DESCRIPTION>  
-  -h, --help                       Print help
+      --kind <KIND>
+          Where it pushes: fly, vercel, github, dotenv, files or command
+
+          Possible values:
+          - fly:     Fly.io app secrets (staged; they apply on the next deploy)
+          - vercel:  Vercel project environment variables
+          - github:  GitHub Actions secrets (repository or environment)
+          - dotenv:  a .env file on this machine, written owner-only
+          - files:   each secret as its own file in a folder (keys, certificates, JSON credentials)
+          - command: pipe the secrets to a program on stdin (anything without a native adapter)
+
+      --set <SETS>
+          key=value (repeatable). Values may reference channel secrets as {NAME}
+
+      --select <SELECT>
+          Which secrets: *, tag:<t>, NAME, "NAME as ALIAS", global:NAME, !NAME (repeatable)
+
+      --connection <CONNECTION>
+          The connection whose access it uses (default: the one named after its kind)
+
+  -d, --description <DESCRIPTION>
+          What it is for (shown in listings and to AI assistants)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### pit dest edit
 
 ```
+Change a destination: kind, settings, selection, connection
+
 Usage: pit dest edit [OPTIONS] <TARGET> <NAME>
 
 Arguments:
-  <TARGET>  
-  <NAME>    
+  <TARGET>
+          PROJECT/CHANNEL[/CHANNEL…] the destination belongs to
+
+  <NAME>
+          The destination's name
 
 Options:
-      --kind <KIND>                
-      --set <SETS>                 key=value (repeatable). Values may reference channel secrets as
-                                   {NAME}
-      --select <SELECT>            Which secrets: *, tag:<t>, NAME, "NAME as ALIAS", global:NAME,
-                                   !NAME (repeatable)
-      --connection <CONNECTION>    
-  -d, --description <DESCRIPTION>  
-  -h, --help                       Print help
+      --kind <KIND>
+          Where it pushes: fly, vercel, github, dotenv, files or command
+
+          Possible values:
+          - fly:     Fly.io app secrets (staged; they apply on the next deploy)
+          - vercel:  Vercel project environment variables
+          - github:  GitHub Actions secrets (repository or environment)
+          - dotenv:  a .env file on this machine, written owner-only
+          - files:   each secret as its own file in a folder (keys, certificates, JSON credentials)
+          - command: pipe the secrets to a program on stdin (anything without a native adapter)
+
+      --set <SETS>
+          key=value (repeatable). Values may reference channel secrets as {NAME}
+
+      --select <SELECT>
+          Which secrets: *, tag:<t>, NAME, "NAME as ALIAS", global:NAME, !NAME (repeatable)
+
+      --connection <CONNECTION>
+          The connection whose access it uses (default: the one named after its kind)
+
+  -d, --description <DESCRIPTION>
+          What it is for (shown in listings and to AI assistants)
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### pit dest rm
 
 ```
+Remove a destination
+
 Usage: pit dest rm <TARGET> <NAME>
 
 Arguments:
-  <TARGET>  
-  <NAME>    
+  <TARGET>  PROJECT/CHANNEL[/CHANNEL…] the destination belongs to
+  <NAME>    The destination to remove
 
 Options:
   -h, --help  Print help
@@ -534,10 +657,12 @@ Options:
 ### pit dest list
 
 ```
+List destinations
+
 Usage: pit dest list [TARGET]
 
 Arguments:
-  [TARGET]  
+  [TARGET]  Only this PROJECT/CHANNEL[/CHANNEL…]
 
 Options:
   -h, --help  Print help
@@ -562,15 +687,29 @@ Delegate access to a service so The Pit can push there (vercel, github, fly)
 Usage: pit connect [OPTIONS] [KIND]
 
 Arguments:
-  [KIND]  vercel | github | fly
+  [KIND]
+          vercel | github | fly
+
+          Possible values:
+          - vercel: Vercel, with a token
+          - github: GitHub, with a token or the gh CLI
+          - fly:    Fly.io, with a token or flyctl
 
 Options:
-      --name <NAME>      
-      --use-cli          Borrow the vendor CLI's own sign-in instead of storing a token (github,
-                         fly)
-      --team <TEAM>      Vercel team id the token belongs to
-      --verify <VERIFY>  Re-check an existing connection with its service
-  -h, --help             Print help
+      --name <NAME>
+          A name for this connection (default: its kind)
+
+      --use-cli
+          Borrow the vendor CLI's own sign-in instead of storing a token (github, fly)
+
+      --team <TEAM>
+          Vercel team id the token belongs to
+
+      --verify <VERIFY>
+          Re-check an existing connection with its service
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit connections
@@ -592,7 +731,7 @@ Remove a connection
 Usage: pit disconnect <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>  The connection to remove
 
 Options:
   -h, --help  Print help
@@ -610,9 +749,9 @@ Arguments:
   [DESTINATIONS]...  Only these destinations
 
 Options:
-      --dry-run  
+      --dry-run  Show what would happen; change nothing
       --force    Overwrite local files even if they hold values the pit does not
-  -y, --yes      
+  -y, --yes      Push without asking first
   -h, --help     Print help
 ```
 
@@ -624,7 +763,7 @@ Compare what a channel holds with what each destination has (names only)
 Usage: pit diff [TARGET]
 
 Arguments:
-  [TARGET]  
+  [TARGET]  PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
 
 Options:
   -h, --help  Print help
@@ -638,11 +777,11 @@ Bring values a tool wrote into a rendered file back into the pit
 Usage: pit absorb [OPTIONS] <TARGET> <DESTINATION>
 
 Arguments:
-  <TARGET>       
-  <DESTINATION>  
+  <TARGET>       PROJECT/CHANNEL[/CHANNEL…] whose rendered file to read back
+  <DESTINATION>  The file destination to read back from
 
 Options:
-      --dry-run  
+      --dry-run  Show what would happen; change nothing
   -h, --help     Print help
 ```
 
@@ -654,7 +793,7 @@ Run a program with a channel's secrets in its environment (nothing written to di
 Usage: pit run [OPTIONS] <COMMAND>...
 
 Arguments:
-  <COMMAND>...  
+  <COMMAND>...  The program to run, and its arguments, after --
 
 Options:
   -c, --channel <TARGET>  PROJECT/CHANNEL (defaults to .pit.toml)
@@ -671,7 +810,7 @@ Link the current folder to a project/channel (writes .pit.toml, no secrets)
 Usage: pit link <TARGET>
 
 Arguments:
-  <TARGET>  
+  <TARGET>  PROJECT or PROJECT/CHANNEL[/CHANNEL…] this folder uses
 
 Options:
   -h, --help  Print help
@@ -685,10 +824,10 @@ The audit log: every push, reveal, unlock and change
 Usage: pit log [OPTIONS]
 
 Options:
-  -n, --limit <LIMIT>      [default: 30]
-      --project <PROJECT>  
+  -n, --limit <LIMIT>      How many entries to show [default: 30]
+      --project <PROJECT>  Only entries about this project
       --event <EVENT>      push | reveal | unlock | …
-      --json               
+      --json               Print JSON
   -h, --help               Print help
 ```
 
@@ -738,7 +877,7 @@ Send the current vault to every target that does not have it yet
 Usage: pit backup sync [OPTIONS]
 
 Options:
-      --quiet  
+      --quiet  Print nothing unless something fails
   -h, --help   Print help
 ```
 
@@ -750,8 +889,8 @@ Send a fresh snapshot to every target (or --to some) right now
 Usage: pit backup now [OPTIONS]
 
 Options:
-      --to <TO>  
-      --quiet    
+      --to <TO>  Only these targets (repeatable)
+      --quiet    Print nothing unless something fails
   -h, --help     Print help
 ```
 
@@ -763,18 +902,42 @@ Add a remote or local backup target
 Usage: pit backup target [OPTIONS] --kind <KIND> <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>
+          A name for this target
 
 Options:
-      --kind <KIND>          dir | ssh | s3 | rclone
-      --path <PATH>          dir: folder (iCloud Drive, Dropbox, an external disk…)
-      --dest <DEST>          ssh: user@host:/path
-      --remote <REMOTE>      rclone: remote:path (Google Drive, OneDrive, Dropbox, B2… via rclone)
-      --bucket <BUCKET>      
-      --region <REGION>      
-      --endpoint <ENDPOINT>  s3: https://… for R2, B2, MinIO; omit for AWS
-      --prefix <PREFIX>      
-  -h, --help                 Print help
+      --kind <KIND>
+          dir | ssh | s3 | rclone
+
+          Possible values:
+          - dir:    a folder: iCloud Drive, Dropbox, an external disk
+          - ssh:    another computer or a server, over SSH
+          - s3:     S3-compatible storage: AWS, R2, B2, MinIO
+          - rclone: Google Drive, OneDrive and more, via rclone
+
+      --path <PATH>
+          dir: folder (iCloud Drive, Dropbox, an external disk…)
+
+      --dest <DEST>
+          ssh: user@host:/path
+
+      --remote <REMOTE>
+          rclone: remote:path (Google Drive, OneDrive, Dropbox, B2… via rclone)
+
+      --bucket <BUCKET>
+          s3: bucket name
+
+      --region <REGION>
+          s3: region, e.g. eu-west-1 (auto for R2)
+
+      --endpoint <ENDPOINT>
+          s3: https://… for R2, B2, MinIO; omit for AWS
+
+      --prefix <PREFIX>
+          s3: folder inside the bucket
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### pit backup untarget
@@ -785,7 +948,7 @@ Remove a backup target
 Usage: pit backup untarget <NAME>
 
 Arguments:
-  <NAME>  
+  <NAME>  The target to remove (its backups stay where they are)
 
 Options:
   -h, --help  Print help
@@ -799,10 +962,16 @@ Back up after every change: on (default) or off
 Usage: pit backup auto <STATE>
 
 Arguments:
-  <STATE>  
+  <STATE>
+          on or off
+
+          Possible values:
+          - on:  turn it on
+          - off: turn it off
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### pit backup list
@@ -831,7 +1000,7 @@ Arguments:
   [B]  Another backup; omitted, the comparison is with the vault as it is now
 
 Options:
-      --from <FROM>  
+      --from <FROM>  Look for backups only on this target
       --password     Ask for the password the backup was made with (for a backup of a different
                      vault)
   -h, --help         Print help
@@ -845,12 +1014,12 @@ Export chosen projects (or everything) as an encrypted bundle
 Usage: pit backup bundle [OPTIONS] --out <OUT>
 
 Options:
-      --project <PROJECTS>         
-      --out <OUT>                  
+      --project <PROJECTS>         Projects to include (repeatable); none means everything
+      --out <OUT>                  Where to write the bundle
       --passphrase                 Also protect it with a passphrase (so it opens without this
                                    vault)
       --to-identity <TO_IDENTITY>  Encrypt it to someone's identity (from `pit identity`)
-      --with-connections           
+      --with-connections           Include connections (the access tokens destinations use)
   -h, --help                       Print help
 ```
 
@@ -862,11 +1031,11 @@ Import a bundle into this vault
 Usage: pit backup import [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  
+  <FILE>  The bundle to import
 
 Options:
-      --passphrase         
-      --replace            
+      --passphrase         Open it with its passphrase (asked for)
+      --replace            Replace values you already have with the bundle's
       --with-destinations  Also take the bundle's destinations and connections. Only for bundles you
                            made yourself
   -h, --help               Print help
@@ -881,10 +1050,10 @@ Replace this vault with a backup: a number from `pit backup list`, `latest`, TAR
 Usage: pit backup restore [OPTIONS] <WHAT>
 
 Arguments:
-  <WHAT>  
+  <WHAT>  A number from `pit backup list`, latest, TARGET:N, or a .pitvault file
 
 Options:
-      --from <FROM>  
+      --from <FROM>  Look for the backup only on this target
   -h, --help         Print help
 ```
 
@@ -896,7 +1065,7 @@ Show what a snapshot or bundle contains, without opening it
 Usage: pit backup inspect <FILE>
 
 Arguments:
-  <FILE>  
+  <FILE>  A .pitvault snapshot or .pitbundle
 
 Options:
   -h, --help  Print help
@@ -910,10 +1079,10 @@ Encrypt any file with a passphrase
 Usage: pit seal [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  
+  <FILE>  The file to encrypt
 
 Options:
-      --out <OUT>  
+      --out <OUT>  Where to write it (default: FILE.pitsealed)
       --remove     Remove the original after sealing
   -h, --help       Print help
 ```
@@ -926,10 +1095,10 @@ Decrypt a file made by `pit seal`
 Usage: pit unseal [OPTIONS] <FILE>
 
 Arguments:
-  <FILE>  
+  <FILE>  A .pitsealed file
 
 Options:
-      --out <OUT>  
+      --out <OUT>  Where to write the decrypted file
   -h, --help       Print help
 ```
 
@@ -1005,10 +1174,16 @@ Require Touch ID after the password (on|off)
 Usage: pit mfa touchid <STATE>
 
 Arguments:
-  <STATE>  
+  <STATE>
+          on or off
+
+          Possible values:
+          - on:  turn it on
+          - off: turn it off
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### pit mfa totp
@@ -1041,10 +1216,16 @@ Touch ID quick unlock on this Mac (on|off)
 Usage: pit quick-unlock <STATE>
 
 Arguments:
-  <STATE>  
+  <STATE>
+          on or off
+
+          Possible values:
+          - on:  turn it on
+          - off: turn it off
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit settings
@@ -1055,8 +1236,8 @@ Show or change settings (session length, idle lock, …)
 Usage: pit settings [KEY] [VALUE]
 
 Arguments:
-  [KEY]    
-  [VALUE]  
+  [KEY]    The setting to show or change; omitted, all of them
+  [VALUE]  Its new value (durations like 15m work for *_secs)
 
 Options:
   -h, --help  Print help
@@ -1070,19 +1251,76 @@ Earlier versions of the whole library, and restoring one
 Usage: pit history [OPTIONS]
 
 Options:
-      --restore <RESTORE>  
+      --restore <RESTORE>  Put this version back (a number from the list)
   -h, --help               Print help
 ```
 
 ## pit identity
 
 ```
-Your identity key, for receiving bundles from someone else
+Your identity key, for receiving bundles and shared secrets from someone else
 
 Usage: pit identity
 
 Options:
   -h, --help  Print help
+```
+
+## pit share
+
+```
+Share one secret with someone's vault. It travels encrypted; nobody sees the value
+
+Usage: pit share [OPTIONS] --to <TO> [ARGS]...
+
+Arguments:
+  [ARGS]...  [SCOPE] NAME
+
+Options:
+      --to <TO>    The recipient's receive request (PIT-RQ-…, from their `pit receive`), or a file
+                   holding it
+      --out <OUT>  Write the share to this file instead of printing it
+      --trust      Do not ask about a recipient you have not shared with before (compare their
+                   identity first)
+  -h, --help       Print help
+```
+
+## pit receive
+
+```
+Receive a shared secret: open a receive window, or save a share into your vault
+
+Usage: pit receive [OPTIONS] [SHARE]
+
+Arguments:
+  [SHARE]  A share (PIT-SH-…), a file holding one, or - to read it from standard input. Without one,
+           opens a receive window and prints the request to give the sender
+
+Options:
+      --into <INTO>        Where to save it: global, PROJECT or PROJECT/CHANNEL (default: the linked
+                           channel)
+      --as <RENAME>        Save it under another name
+      --replace            Replace an existing value (the old one stays in history)
+      --trust              Do not ask about a sender you have not exchanged secrets with before
+                           (compare their identity first)
+      --for <DUR>          How long the receive window stays open, e.g. 5m, 1h (max 24h). Locking
+                           the pit closes it [default: 15m]
+      --list               List open receive windows
+      --cancel [<CANCEL>]  Close a receive window now (by id), or all of them
+  -h, --help               Print help
+```
+
+## pit contacts
+
+```
+People you have shared secrets with, and their identity keys
+
+Usage: pit contacts [OPTIONS]
+
+Options:
+      --forget <FORGET>  Forget a contact (by name or identity); you will be asked to confirm them
+                         again
+  -h, --help             Print help
 ```
 
 ## pit emergency
@@ -1108,7 +1346,7 @@ Dump every secret out of the vault (needs any working way in)
 Usage: pit emergency export [OPTIONS] --out <OUT>
 
 Options:
-      --out <OUT>  
+      --out <OUT>  Where to write the export
       --plaintext  Write plaintext: one folder per project/channel with .env files and files
   -h, --help       Print help
 ```
@@ -1149,17 +1387,35 @@ my-app/development
 Usage: pit import env [OPTIONS] <FILES>...
 
 Arguments:
-  <FILES>...  
+  <FILES>...
+          The .env, JSON or YAML files to read
 
 Options:
-      --to <TO>                  Where they go: global, PROJECT or PROJECT/CHANNEL (defaults to
-                                 .pit.toml)
-  -p, --protection <PROTECTION>  sealed (two-way, default) | hashed (one-way) | plain
-      --overwrite                Replace existing values that differ (old values stay in history)
-      --skip <SKIP>              Keys to leave out
-      --tag <TAG>                
-      --dry-run                  
-  -h, --help                     Print help
+      --to <TO>
+          Where they go: global, PROJECT or PROJECT/CHANNEL (defaults to .pit.toml)
+
+  -p, --protection <PROTECTION>
+          sealed (two-way, default) | hashed (one-way) | plain
+
+          Possible values:
+          - sealed: two-way: encrypted, pushable, revealable with approval (default)
+          - hashed: one-way: only verifiable, never pushed or revealed
+          - plain:  not sensitive: readable whenever the pit is open
+
+      --overwrite
+          Replace existing values that differ (old values stay in history)
+
+      --skip <SKIP>
+          Keys to leave out
+
+      --tag <TAG>
+          Tags (comma-separated), for choosing secrets by tag
+
+      --dry-run
+          Show what would happen; change nothing
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ### pit import secret-pit
@@ -1170,11 +1426,11 @@ Import a folder laid out as PROJECT/ENVIRONMENT/*.env (see docs/importing.md)
 Usage: pit import secret-pit [OPTIONS] <DIR>
 
 Arguments:
-  <DIR>  
+  <DIR>  The folder, laid out PROJECT/ENVIRONMENT/*.env
 
 Options:
-      --map <MAP>  
-      --dry-run    
+      --map <MAP>  A TOML map renaming projects, channels and secrets (see examples/)
+      --dry-run    Show what would happen; change nothing
   -h, --help       Print help
 ```
 
@@ -1186,16 +1442,32 @@ Look through a project for secrets and offer to copy them in. Never edits the pr
 Usage: pit scan [OPTIONS] [DIR]
 
 Arguments:
-  [DIR]  The project folder (default: here)
+  [DIR]
+          The project folder (default: here)
 
 Options:
-      --to <TO>                  Where accepted findings go: PROJECT or PROJECT/CHANNEL (defaults to
-                                 .pit.toml)
-      --all                      Also list ordinary settings (ports, hosts, flags)
-      --report                   Only report; do not offer to import
-      --json                     Report as JSON (names, places and lengths — never values)
-  -p, --protection <PROTECTION>  
-  -h, --help                     Print help
+      --to <TO>
+          Where accepted findings go: PROJECT or PROJECT/CHANNEL (defaults to .pit.toml)
+
+      --all
+          Also list ordinary settings (ports, hosts, flags)
+
+      --report
+          Only report; do not offer to import
+
+      --json
+          Report as JSON (names, places and lengths — never values)
+
+  -p, --protection <PROTECTION>
+          How to store what you pick: sealed (default), hashed or plain
+
+          Possible values:
+          - sealed: two-way: encrypted, pushable, revealable with approval (default)
+          - hashed: one-way: only verifiable, never pushed or revealed
+          - plain:  not sensitive: readable whenever the pit is open
+
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit service
@@ -1206,10 +1478,18 @@ Run The Pit's agent as a login service (launchd / systemd)
 Usage: pit service <ACTION>
 
 Arguments:
-  <ACTION>  
+  <ACTION>
+          install | uninstall | status | restart
+
+          Possible values:
+          - install:   start the agent at login
+          - uninstall: stop starting it at login
+          - status:    is it installed and running
+          - restart:   restart the agent
 
 Options:
-  -h, --help  Print help
+  -h, --help
+          Print help (see a summary with '-h')
 ```
 
 ## pit doctor
@@ -1253,7 +1533,7 @@ Run the agent in the foreground
 Usage: pit agent [OPTIONS]
 
 Options:
-      --foreground  
+      --foreground  Stay in the foreground and log to the terminal
   -h, --help        Print help
 ```
 
@@ -1266,4 +1546,25 @@ Usage: pit console
 
 Options:
   -h, --help  Print help
+```
+
+## pit completions
+
+```
+Print Tab completion for your shell: eval "$(pit completions zsh)" (or bash; fish: | source)
+
+Usage: pit completions <SHELL>
+
+Arguments:
+  <SHELL>
+          zsh | bash | fish
+
+          Possible values:
+          - zsh:  eval "$(pit completions zsh)" in ~/.zshrc
+          - bash: eval "$(pit completions bash)" in ~/.bashrc
+          - fish: pit completions fish | source, in config.fish
+
+Options:
+  -h, --help
+          Print help (see a summary with '-h')
 ```

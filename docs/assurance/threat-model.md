@@ -31,7 +31,9 @@ Source references are to files and functions in `src/` at version 0.1.1.
 | **Backups** | `.pitvault` snapshots on every target; `.pitbundle` exports | Hold the same ciphertext as the vault, and the key slots that open it. |
 | **Destination credentials** | Connection tokens (sealed in the library), borrowed CLI sessions (`gh`, `flyctl`), S3 keys (Keychain) | Let The Pit write to Fly, Vercel, GitHub and backup storage. |
 | **Destination configuration** | Library: destinations, settings, selections | Decides *where* values are sent. Changing it changes where secrets go. |
-| **Identity key pair** (X25519) | Secret half in the library; public half shared freely | Lets others encrypt bundles to this vault. |
+| **Identity key pair** (X25519) | Secret half in the library; public half shared freely | Lets others encrypt bundles and shared secrets to this vault, and authenticates the secrets it shares. |
+| **Receive window keys** (X25519) | Only in the agent's memory (`agent::Session::inbox`), until used, timed out, cancelled or locked | Needed, with the identity, to open a share. |
+| **Contacts** | Library: identity keys confirmed by the owner | Decide which identities a share is sent to or accepted from without asking. |
 
 ## 2. Actors and attackers
 
@@ -189,8 +191,9 @@ documented in [docs/security.md](../security.md#what-the-pit-does-not-protect-ag
 | **S** | Repeated guessing of the password or codes. | Persistent exponential back-off after 3 failures, up to an hour; 6 wrong approvals close the session (`agent::throttle_check`, `throttle_fail`, `LOCK_AFTER_FAILURES`). The failure count is kept in three places — a file in `state/`, the OS keychain and the agent's memory — and the highest wins, so clearing one does not reset it (`agent::throttle_load`). Unlock also requires a second factor when enrolled (`agent::second_factor`). | *Low* on macOS. *Medium* on Linux, where there is no keychain copy and the in-memory copy lasts only as long as the agent process. Argon2id cost still applies to every password guess. |
 | **S** | Quick unlock (Touch ID alone) used indefinitely without the password. | Refused when the password has not been used within `password_recheck_days` (default 7) (`agent::unlock`). | *Low.* |
 | **T** | Where values are sent is changed during an open session. | Adding or editing a destination always needs approval, on every channel and from every client (`ops::needs_approval`: `dest.add`, `dest.edit`); the end-to-end suite checks this on an unprotected channel (`tests/e2e.py`). An unprotected channel cannot push to an address a protected channel uses (`ops::guard_collisions`). | *Low.* An open `pit elevate` window also covers these approvals (see the first row). |
-| **T** | Values in unprotected channels changed during an open session. | Protected channels, and project/global scopes a protected channel inherits, require approval for changes (`ops::scope_protected`, `ops::needs_approval`). | *Accepted.* For **unprotected** channels, while unlocked, setting values and removing destinations do not require approval from a CLI client. Protect channels whose values matter, and keep sessions short. |
+| **T** | Values in unprotected channels changed during an open session. | Protected channels, every channel inside a protected channel (`Library::channel_protected`), and any project or channel scope a protected channel inherits from, require approval for changes (`ops::scope_protected`, `Library::channel_sees`, `ops::needs_approval`); a channel inside a protected one cannot be unprotected. | *Accepted.* For **unprotected** channels, while unlocked, setting values and removing destinations do not require approval from a CLI client. Protect channels whose values matter, and keep sessions short. |
 | **I** | Values read without the person's knowledge. | Reveals, `pit run`, exports and every operation on a protected channel need approval (`ops::ALWAYS_APPROVE`; `run.env` gated by `run_needs_approval`, default on). Clipboard copies cleared after 30 s. | *Accepted* (documented): an unlocked session lets same-user code list names and push unprotected channels to the destinations the person already approved. |
+| **E** | Shell or console completion used to read more than names, or to keep a session open. | Completion uses its own client, which the agent limits to listing operations (`agent::COMPLETE_OPS`) and which does not refresh the idle timer (`agent::handle`); it never starts the agent (`protocol::peek`). | *Low.* Names and descriptions are visible to same-user code while unlocked, as with `pit ls`. |
 | **D** | The person is locked out by repeated wrong guesses from malware. | Back-off is bounded (max one hour); recovery code and shares remain available (`agent::unlock`, `shamir::combine`). | *Low.* |
 | **E** | A forgotten-password path bypasses factors. | Only the recovery code (256-bit) resets factors; it opens a 10-minute elevated window and forces a new password (`agent::unlock`). | *Low.* Whoever holds the recovery code holds the vault — by design. |
 
@@ -251,6 +254,17 @@ documented in [docs/security.md](../security.md#what-the-pit-does-not-protect-ag
 | **T** | Names or file names with path tricks. | Project names, secret names and file names are validated (`model::valid_slug`, `model::valid_name`, `model::safe_relative`, `backup::check_imported_secret`); a value still sealed to another vault is refused (`backup::adopt_secret`). | *Low.* |
 | **I** | A plaintext emergency export is left on disk. | Plaintext export needs approval, is clearly labelled, and is refused to AI; the passphrase form is recommended. | *Accepted.* Once written, its safety is the file's. |
 | **D** | Malformed input crashes the importer. | Parsing is in memory-safe Rust with typed deserialization (`serde`); malformed input is rejected with an error. | *Low.* Six cargo-fuzz targets cover the parsers of outside input — imports, recovery codes, snapshots, agent requests, sealed records and authenticator codes ([`fuzz/fuzz_targets`](../../fuzz/fuzz_targets), run by [`assurance.yml`](../../.github/workflows/assurance.yml)). |
+
+### 5.9a Sharing a secret with another vault
+
+| STRIDE | Threat | Mitigation (evidence) | Residual |
+| --- | --- | --- | --- |
+| **S** | A receive request is replaced on its way to the sender. | The share is sealed to the recipient's identity, which the sender confirms out of band the first time and is then kept as a contact (`ops::share_send`, `share::seal`). | *Low.* Depends on the person actually comparing identities on first exchange. |
+| **S** | A share comes from someone other than who it claims. | The inner layer is a `crypto_box` authenticated with the sender's identity, and the sender named inside is checked against it (`share::Envelope::open`); an unknown sender needs confirmation (`ops::share_accept`). | *Low.* |
+| **T** | A share replaces a value the recipient has. | Never without `--replace`, which asks for approval; protected scopes always ask (`ops::needs_approval`: `share.accept`). The old value stays in history. | *Low.* |
+| **I** | A share or request is read in transit or found later. | Requests carry only public keys. Shares open only with the recipient's identity key **and** a window key held in agent memory; the window key is wiped on use, timeout, cancel or lock (`ops::share_accept`, agent reaper). | *Low.* A share opened inside its window is exposed exactly as any value in that vault is. |
+| **E** | Malware or an AI client sends secrets out as shares. | `share.send` always needs approval and is refused to AI clients (`ops::ALWAYS_APPROVE`, `ops::AI_REFUSED`); the audit entry is written first or nothing is handed out (`Session::audit_strict`). | *Low.* |
+| **D** | Many windows are opened. | At most 16 at once, each at most 24 hours and never past the session (`ops::share_request`). | *Low.* |
 
 ### 5.10 Integration rail — destinations (TB5, TB7)
 
@@ -321,7 +335,7 @@ Revisit this model, in the same pull request, when any of the following changes:
 
 1. A new agent operation, or a change to `ops::needs_approval`, `ALWAYS_APPROVE` or `AI_REFUSED`.
 2. A new MCP tool, or any MCP tool's output.
-3. A new destination kind, backup target kind, import format or bundle slot type.
+3. A new destination kind, backup target kind, import format, bundle slot type, or share format.
 4. Any change to `src/crypto.rs`, `src/vault.rs`, `src/values.rs`, `src/audit.rs` or key derivation labels.
 5. A new platform, or a platform gaining or losing Keychain / biometric support.
 6. A change to the socket, peer checks, process hardening or file permissions.

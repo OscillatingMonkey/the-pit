@@ -7,15 +7,15 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
 
-use crate::agent::{Caller, Session, Shared};
+use crate::agent::{Caller, Inbox, Session, Shared};
 use crate::error::{invalid, Error, Result};
 use crate::model::{
-    fmt_time, now, valid_name, valid_slug, Channel, Connection, Destination, Kind, Library,
-    Project, Protection, Scope, Secret,
+    channel_lineage, fmt_time, now, parent_channel, valid_channel, valid_name, valid_slug, within,
+    Channel, Connection, Contact, Destination, Kind, Library, Project, Protection, Scope, Secret,
 };
 use crate::protocol::Request;
 use crate::rail::{self, Item};
-use crate::{backup, codes, crypto, importer, resolve, totp, values, vault};
+use crate::{backup, codes, crypto, importer, resolve, share, totp, values, vault};
 
 // ---------------------------------------------------------------------------
 // arguments
@@ -98,6 +98,12 @@ const AI_REFUSED: &[&str] = &[
     "project.rm",
     "channel.rm",
     "secret.rm",
+    "share.request",
+    "share.send",
+    "share.open",
+    "share.accept",
+    "share.cancel",
+    "contact.rm",
 ];
 
 const ALWAYS_APPROVE: &[&str] = &[
@@ -120,23 +126,33 @@ const ALWAYS_APPROVE: &[&str] = &[
     "channel.rm",
     "secret.rm",
     "secret.rollback",
+    "share.send",
 ];
 
 /// A scope is protected if a protected channel can see what is in it: the
-/// channel itself, a project inherited by a protected channel, or the global
-/// scope when any protected channel exists.
+/// channel itself, a channel or project a protected channel inherits from, or
+/// the global scope when any protected channel exists.
 pub fn scope_protected(lib: &Library, sc: &Scope) -> bool {
-    match sc {
-        Scope::Channel(p, c) => lib.channel(p, c).map(|c| c.protected).unwrap_or(false),
-        Scope::Project(p) => lib
-            .project(p)
-            .map(|p| p.channels.values().any(|c| c.protected && c.inherit))
-            .unwrap_or(false),
-        Scope::Global => lib
-            .projects
-            .values()
-            .any(|p| p.channels.values().any(|c| c.protected)),
-    }
+    let p = match sc {
+        Scope::Global => {
+            return lib
+                .projects
+                .iter()
+                .any(|(pn, p)| p.channels.keys().any(|cn| lib.channel_protected(pn, cn)))
+        }
+        Scope::Project(p) | Scope::Channel(p, _) => p,
+    };
+    lib.project(p)
+        .map(|proj| {
+            proj.channels.keys().any(|cn| {
+                lib.channel_protected(p, cn)
+                    && lib
+                        .channel_sees(p, cn)
+                        .map(|v| v.contains(sc))
+                        .unwrap_or(false)
+            })
+        })
+        .unwrap_or(false)
 }
 
 fn channel_protected(lib: &Library, req: &Request) -> bool {
@@ -147,7 +163,12 @@ fn channel_protected(lib: &Library, req: &Request) -> bool {
             .unwrap_or(false)
     });
     let from_pc = match (o(req, "project"), o(req, "channel")) {
-        (Some(p), Some(c)) => lib.channel(p, c).map(|c| c.protected).unwrap_or(false),
+        // Sending a channel's values out is protected if the channel is; changing a
+        // channel is protected if any protected channel sees what it holds.
+        (Some(p), Some(c)) if ["push", "absorb", "run.env"].contains(&req.op.as_str()) => {
+            lib.channel_protected(p, c)
+        }
+        (Some(p), Some(c)) => scope_protected(lib, &Scope::Channel(p.into(), c.into())),
         _ => false,
     };
     scoped || from_pc
@@ -188,6 +209,25 @@ fn describe(req: &Request) -> String {
             format!("push {pc} to {to}")
         }
         "secret.reveal" => format!("reveal{name} from {pc}"),
+        "share.send" => {
+            let to = o(req, "request")
+                .and_then(|r| share::Request::decode(r).ok())
+                .map(|r| r.name)
+                .unwrap_or_default();
+            format!("share{name} from {pc} with {to}")
+        }
+        "channel.rm" if b(req, "recursive").unwrap_or(false) => {
+            format!("remove channel {pc} and every channel inside it")
+        }
+        "share.accept" => format!(
+            "save a shared secret into {}{}",
+            o(req, "scope").unwrap_or(""),
+            if b(req, "overwrite").unwrap_or(false) {
+                ", replacing the value there"
+            } else {
+                ""
+            }
+        ),
         "run.env" => format!("load {pc} into a program's environment"),
         "absorb" => format!(
             "absorb values from {pc} {}",
@@ -261,6 +301,13 @@ pub fn needs_approval(state: &Shared, caller: &Caller, req: &Request) -> Result<
             !b(req, "dry_run").unwrap_or(false)
                 && (protected || b(req, "overwrite").unwrap_or(false))
         }
+        // Receiving is like `pit set`: a new value asks on protected scopes,
+        // replacing an existing one always asks.
+        "share.accept" => protected || b(req, "overwrite").unwrap_or(false),
+        // Opening a receive window, reading who a share is from, listing and
+        // closing windows, and listing contacts hand out no value.
+        "share.request" | "share.open" | "share.pending" | "share.cancel" | "contact.list"
+        | "contact.rm" => false,
         _ => false,
     };
     Ok(if need { Some(reason) } else { None })
@@ -308,9 +355,8 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
                 channels: BTreeMap::new(),
             };
             for c in strings(req, "channels") {
-                valid_slug("channel", &c)?;
-                p.channels
-                    .insert(c.clone(), new_channel(&c, "", c == "production"));
+                valid_channel(&c)?;
+                add_channel_path(&mut p, &c, "", None);
             }
             s.lib.projects.insert(name.clone(), p);
             s.save()?;
@@ -357,24 +403,28 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
         "channel.add" => {
             let p = s_(req, "project")?;
             let c = s_(req, "name")?;
-            valid_slug("channel", &c)?;
-            let protected = b(req, "protected").unwrap_or(c == "production");
+            valid_channel(&c)?;
             let project = s.lib.project_mut(&p)?;
             if project.channels.contains_key(&c) {
                 return Err(Error::Exists(format!("channel {p}/{c}")));
             }
-            let mut ch = new_channel(&c, o(req, "description").unwrap_or(""), protected);
+            let created = add_channel_path(
+                project,
+                &c,
+                o(req, "description").unwrap_or(""),
+                b(req, "protected"),
+            );
             if let Some(i) = b(req, "inherit") {
-                ch.inherit = i;
+                project.channels.get_mut(&c).expect("just added").inherit = i;
             }
-            project.channels.insert(c.clone(), ch);
+            let protected = s.lib.channel_protected(&p, &c);
             s.save()?;
             s.audit(
                 "channel.add",
                 &caller.actor,
-                json!({"project": p, "channel": c, "protected": protected}),
+                json!({"project": p, "channel": c, "protected": protected, "created": created}),
             );
-            Ok(json!({"channel": format!("{p}/{c}"), "protected": protected}))
+            Ok(json!({"channel": format!("{p}/{c}"), "protected": protected, "created": created}))
         }
         "channel.edit" => {
             let p = s_(req, "project")?;
@@ -389,16 +439,39 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
             if let Some(pr) = b(req, "protected") {
                 ch.protected = pr;
             }
-            let state = json!({"inherit": ch.inherit, "protected": ch.protected});
+            if !s.lib.channel(&p, &c)?.protected
+                && s.lib.channel_protected(&p, &c)
+                && b(req, "protected") == Some(false)
+            {
+                return Err(Error::Refused(format!(
+                    "{p}/{c} is inside a protected channel, so it stays protected"
+                )));
+            }
+            let mut state = json!({"inherit": s.lib.channel(&p, &c)?.inherit, "protected": s.lib.channel_protected(&p, &c)});
             if let Some(new) = o(req, "rename") {
+                // A rename changes the last part of the path; channels inside move with it.
                 valid_slug("channel", new)?;
+                let to = match parent_channel(&c) {
+                    Some(up) => format!("{up}/{new}"),
+                    None => new.to_string(),
+                };
                 let project = s.lib.project_mut(&p)?;
-                if project.channels.contains_key(new) {
-                    return Err(Error::Exists(format!("channel {p}/{new}")));
+                if project.channels.contains_key(&to) {
+                    return Err(Error::Exists(format!("channel {p}/{to}")));
                 }
-                let mut ch = project.channels.remove(&c).expect("checked above");
-                ch.name = new.into();
-                project.channels.insert(new.into(), ch);
+                let moving: Vec<String> = project
+                    .channels
+                    .keys()
+                    .filter(|k| within(k, &c))
+                    .cloned()
+                    .collect();
+                for old in moving {
+                    let mut ch = project.channels.remove(&old).expect("listed above");
+                    let path = format!("{to}{}", &old[c.len()..]);
+                    ch.name = path.clone();
+                    project.channels.insert(path, ch);
+                }
+                state["channel"] = json!(format!("{p}/{to}"));
             }
             s.save()?;
             s.audit(
@@ -411,18 +484,30 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
         "channel.rm" => {
             let p = s_(req, "project")?;
             let c = s_(req, "channel")?;
-            s.lib
-                .project_mut(&p)?
+            let project = s.lib.project_mut(&p)?;
+            if !project.channels.contains_key(&c) {
+                return Err(Error::NotFound(format!("channel {p}/{c}")));
+            }
+            let inside: Vec<String> = project
                 .channels
-                .remove(&c)
-                .ok_or_else(|| Error::NotFound(format!("channel {p}/{c}")))?;
+                .keys()
+                .filter(|k| within(k, &c) && **k != c)
+                .cloned()
+                .collect();
+            if !inside.is_empty() && !b(req, "recursive").unwrap_or(false) {
+                return Err(Error::Refused(format!(
+                    "{p}/{c} has channels inside it ({}); remove them first, or remove them all with --recursive",
+                    inside.join(", ")
+                )));
+            }
+            project.channels.retain(|k, _| !within(k, &c));
             s.save()?;
             s.audit(
                 "channel.rm",
                 &caller.actor,
-                json!({"project": p, "channel": c}),
+                json!({"project": p, "channel": c, "inside": inside}),
             );
-            Ok(json!({"removed": format!("{p}/{c}")}))
+            Ok(json!({"removed": format!("{p}/{c}"), "inside": inside}))
         }
 
         "secret.declare" | "secret.set" | "secret.generate" => secret_set(s, caller, req),
@@ -776,6 +861,33 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
                 "changes": backup::diff(&la, &lb),
             }))
         }
+        "share.request" => share_request(s, caller, req),
+        "share.pending" => Ok(share_pending(s)),
+        "share.cancel" => {
+            let id = o(req, "id");
+            let before = s.inbox.len();
+            s.inbox.retain(|w| id.map(|i| w.id() != i).unwrap_or(false));
+            Ok(json!({"closed": before - s.inbox.len()}))
+        }
+        "share.check" => share_check(s, req),
+        "share.send" => share_send(s, caller, req),
+        "share.open" => share_open(s, req),
+        "share.accept" => share_accept(s, caller, req),
+        "contact.list" => Ok(
+            json!({"contacts": s.lib.contacts.iter().map(|(id, c)| json!({"identity": id, "name": c.name, "added": fmt_time(c.added)})).collect::<Vec<_>>()}),
+        ),
+        "contact.rm" => {
+            let who = arg(req, "who")?;
+            let before = s.lib.contacts.len();
+            s.lib.contacts.retain(|id, c| id != who && c.name != who);
+            if s.lib.contacts.len() == before {
+                return Err(Error::NotFound(format!("contact {who}")));
+            }
+            s.save()?;
+            s.audit("contact.rm", &caller.actor, json!({"who": who}));
+            Ok(json!({"removed": before - s.lib.contacts.len()}))
+        }
+
         "import.secretpit" => {
             let dir = arg(req, "dir")?.to_string();
             let map = o(req, "map").unwrap_or("").to_string();
@@ -797,6 +909,34 @@ pub fn dispatch(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value
 
 fn s_(req: &Request, k: &str) -> Result<String> {
     arg(req, k).map(String::from)
+}
+
+/// Add a channel, and any channels above it that do not exist yet. A new
+/// channel named `production` is protected unless `protected` says otherwise.
+/// Returns the paths created, outermost first.
+fn add_channel_path(
+    project: &mut Project,
+    path: &str,
+    description: &str,
+    protected: Option<bool>,
+) -> Vec<String> {
+    let mut created = vec![];
+    for at in channel_lineage(path) {
+        if project.channels.contains_key(at) {
+            continue;
+        }
+        let last = at.rsplit('/').next().unwrap_or(at);
+        let (desc, prot) = if at == path {
+            (description, protected.unwrap_or(last == "production"))
+        } else {
+            ("", last == "production")
+        };
+        project
+            .channels
+            .insert(at.to_string(), new_channel(at, desc, prot));
+        created.push(at.to_string());
+    }
+    created
 }
 
 pub fn new_channel(name: &str, description: &str, protected: bool) -> Channel {
@@ -843,6 +983,13 @@ pub fn secret_meta(sec: &Secret) -> Value {
     })
 }
 
+/// A project's channels with each one directly followed by the channels inside it.
+fn channels_in_tree_order(p: &Project) -> Vec<&Channel> {
+    let mut v: Vec<&Channel> = p.channels.values().collect();
+    v.sort_by(|a, b| a.name.split('/').cmp(b.name.split('/')));
+    v
+}
+
 fn tree(lib: &Library, only: Option<&str>) -> Value {
     // A one-way secret that a destination expects is flagged wherever it is listed.
     let secret_meta = |sec: &Secret| {
@@ -861,11 +1008,12 @@ fn tree(lib: &Library, only: Option<&str>) -> Value {
                 "name": p.name,
                 "description": p.description,
                 "secrets": p.secrets.values().map(&secret_meta).collect::<Vec<_>>(),
-                "channels": p.channels.values().map(|c| json!({
+                "channels": channels_in_tree_order(p).into_iter().map(|c| json!({
                     "name": c.name,
                     "description": c.description,
                     "inherit": c.inherit,
-                    "protected": c.protected,
+                    "protected": lib.channel_protected(&p.name, &c.name),
+                    "parent": parent_channel(&c.name),
                     "secrets": c.secrets.values().map(&secret_meta).collect::<Vec<_>>(),
                     "destinations": c.destinations.values().map(|d| json!({
                         "name": d.name,
@@ -1444,8 +1592,8 @@ fn guard_collisions(
     kind: &str,
     address: &str,
 ) -> Result<()> {
-    let ch = s.lib.channel(project, channel)?;
-    if ch.protected {
+    s.lib.channel(project, channel)?;
+    if s.lib.channel_protected(project, channel) {
         return Ok(());
     }
     for other in s
@@ -1453,7 +1601,7 @@ fn guard_collisions(
         .project(project)?
         .channels
         .values()
-        .filter(|c| c.protected)
+        .filter(|c| s.lib.channel_protected(project, &c.name))
     {
         for d in other.destinations.values().filter(|d| d.kind == kind) {
             if let Ok(p) = prepare(s, project, &other.name, d) {
@@ -1475,7 +1623,7 @@ fn push(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
     let dry = b(req, "dry_run").unwrap_or(false);
     let force = b(req, "force").unwrap_or(false);
     let ch = s.lib.channel(&project, &channel)?;
-    let protected = ch.protected;
+    let protected = s.lib.channel_protected(&project, &channel);
     let wanted = strings(req, "destinations");
     let dests: Vec<Destination> = if wanted.is_empty() {
         ch.destinations.values().cloned().collect()
@@ -1620,7 +1768,7 @@ fn remote(s: &Session, req: &Request) -> Result<Value> {
             let ctx = rail::Ctx {
                 project: &project,
                 channel: &channel,
-                protected: ch.protected,
+                protected: s.lib.channel_protected(&project, &channel),
                 dest_name: &d.name,
                 config: prep.ctx_config,
                 token: prep.token,
@@ -1673,7 +1821,7 @@ fn absorb(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
     let ctx = rail::Ctx {
         project: &project,
         channel: &channel,
-        protected: ch.protected,
+        protected: s.lib.channel_protected(&project, &channel),
         dest_name: &d.name,
         config: prep.ctx_config,
         token: None,
@@ -1803,5 +1951,276 @@ fn log(s: &Session, req: &Request) -> Result<Value> {
     events.reverse();
     Ok(
         json!({"events": events, "total": v.events.len(), "intact": v.broken_at.is_none(), "broken_at": v.broken_at}),
+    )
+}
+
+// ---------------------------------------------------------------------------
+// sharing one secret with another vault (see `share`)
+
+/// Longest a receive window stays open, and how many may be open at once.
+const SHARE_MAX_SECS: u64 = 24 * 3600;
+const SHARE_MAX_OPEN: usize = 16;
+
+/// An identity as `PIT-ID-…`, and the name it was confirmed under, if it was.
+fn contact_of(lib: &Library, identity: &[u8]) -> (String, Option<String>) {
+    let id = codes::encode("ID", identity);
+    let known = lib.contacts.get(&id).map(|c| c.name.clone());
+    (id, known)
+}
+
+fn share_request(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
+    let at = Instant::now();
+    s.inbox.retain(|w| at < w.until);
+    if s.inbox.len() >= SHARE_MAX_OPEN {
+        return Err(Error::Refused(format!(
+            "{SHARE_MAX_OPEN} receive windows are already open; close them with `pit receive --cancel`"
+        )));
+    }
+    // A window's key lives in the session, so it cannot outlast it.
+    let left = s.expires.saturating_duration_since(at).as_secs();
+    let secs = u(req, "secs")
+        .unwrap_or(15 * 60)
+        .clamp(60, SHARE_MAX_SECS)
+        .min(left);
+    if secs < 60 {
+        return Err(Error::Refused(
+            "this session ends in under a minute; lock and unlock again first".into(),
+        ));
+    }
+    let identity: [u8; 32] = s
+        .lib
+        .owner
+        .identity_public
+        .as_slice()
+        .try_into()
+        .map_err(|_| Error::Crypto("identity".into()))?;
+    let key = crypto_box::SecretKey::generate(&mut rand_core::OsRng);
+    let expires = now() + secs as i64;
+    let code = share::Request {
+        identity,
+        window: key.public_key().to_bytes(),
+        expires,
+        name: s.lib.owner.name.clone(),
+    }
+    .encode();
+    let w = Inbox {
+        key,
+        until: at + Duration::from_secs(secs),
+        expires,
+    };
+    let id = w.id();
+    s.inbox.push(w);
+    s.audit(
+        "share.request",
+        &caller.actor,
+        json!({"window": id, "secs": secs}),
+    );
+    Ok(json!({
+        "request": code, "window": id, "expires_in": secs, "expires": fmt_time(expires),
+        "idle_secs": s.lib.settings.idle_secs,
+    }))
+}
+
+fn share_pending(s: &Session) -> Value {
+    let at = Instant::now();
+    let list: Vec<Value> = s
+        .inbox
+        .iter()
+        .filter(|w| at < w.until)
+        .map(|w| json!({"window": w.id(), "expires_in": w.until.duration_since(at).as_secs(), "expires": fmt_time(w.expires)}))
+        .collect();
+    json!({"windows": list})
+}
+
+fn share_request_arg(req: &Request) -> Result<share::Request> {
+    let r = share::Request::decode(arg(req, "request")?)?;
+    if r.expires <= now() {
+        return Err(Error::Refused(format!(
+            "this receive request closed at {}; ask {} to run `pit receive` again",
+            fmt_time(r.expires),
+            r.name
+        )));
+    }
+    if r.expires > now() + SHARE_MAX_SECS as i64 + 300 {
+        return invalid("this receive request claims to stay open longer than any window can");
+    }
+    Ok(r)
+}
+
+/// Who a receive request is from, without sending anything.
+fn share_check(s: &Session, req: &Request) -> Result<Value> {
+    let r = share_request_arg(req)?;
+    let (id, known) = contact_of(&s.lib, &r.identity);
+    Ok(json!({"name": r.name, "identity": id, "known_as": known, "expires_in": r.expires - now()}))
+}
+
+fn share_send(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
+    let sc = scope(req)?;
+    let name = s_(req, "name")?;
+    let r = share_request_arg(req)?;
+    let (to, known) = contact_of(&s.lib, &r.identity);
+    if known.is_none() && !b(req, "trust").unwrap_or(false) {
+        return Err(Error::Refused(format!(
+            "{to} is not an identity you have shared with before; compare it with what {} sees in `pit identity`, then confirm it",
+            r.name
+        )));
+    }
+    let sec = s
+        .lib
+        .secrets(&sc)?
+        .get(&name)
+        .ok_or_else(|| Error::NotFound(format!("{name} in {sc}")))?;
+    let value = values::open(&s.keys, sec)?
+        .ok_or_else(|| Error::Invalid(format!("{name} in {sc} has no value to share")))?;
+    let fp = sec.fingerprint().map(String::from);
+    let item = share::Item {
+        name: name.clone(),
+        description: sec.description.clone(),
+        filename: match &sec.kind {
+            Kind::File { filename } => Some(filename.clone()),
+            Kind::Text => None,
+        },
+        value: value.to_vec(),
+    };
+    let code = share::seal(
+        &s.lib.owner.identity_secret,
+        &s.lib.owner.name,
+        &r,
+        item,
+        now(),
+    )?;
+    s.audit_strict(
+        "share.send",
+        &caller.actor,
+        json!({"scope": sc.to_string(), "name": name, "fp": fp, "to": to, "to_name": r.name}),
+    )?;
+    if known.is_none() {
+        s.lib.contacts.insert(
+            to.clone(),
+            Contact {
+                name: r.name.clone(),
+                added: now(),
+            },
+        );
+        s.save()?;
+    }
+    Ok(json!({
+        "share": code, "to": known.unwrap_or(r.name), "identity": to,
+        "expires_in": r.expires - now(), "fp": fp,
+    }))
+}
+
+/// Open a share with this vault's identity and the receive window it names.
+fn open_share(s: &Session, req: &Request) -> Result<(share::Opened, [u8; 32], u64)> {
+    let env = share::peel(&s.lib.owner.identity_secret, arg(req, "share")?)?;
+    let at = Instant::now();
+    let w = s
+        .inbox
+        .iter()
+        .find(|w| at < w.until && w.key.public_key().to_bytes() == env.window)
+        .ok_or_else(|| {
+            Error::Refused(
+                "the receive window for this share is closed — it timed out, was already used, \
+                 or the pit was locked since. Run `pit receive` again and ask for a new share."
+                    .into(),
+            )
+        })?;
+    Ok((
+        env.open(&w.key)?,
+        env.window,
+        w.until.duration_since(at).as_secs(),
+    ))
+}
+
+/// Who a share is from and what it holds — never the value. The window stays open.
+fn share_open(s: &Session, req: &Request) -> Result<Value> {
+    let (got, _, left) = open_share(s, req)?;
+    let (from, known) = contact_of(&s.lib, &got.from);
+    Ok(json!({
+        "from": got.from_name, "identity": from, "known_as": known,
+        "name": got.item.name, "description": got.item.description,
+        "filename": got.item.filename, "len": got.item.value.len(),
+        "sent": fmt_time(got.sent), "expires_in": left,
+    }))
+}
+
+fn share_accept(s: &mut Session, caller: &Caller, req: &Request) -> Result<Value> {
+    let sc = scope(req)?;
+    let overwrite = b(req, "overwrite").unwrap_or(false);
+    let (got, window, _) = open_share(s, req)?;
+    let (from, known) = contact_of(&s.lib, &got.from);
+    if known.is_none() && !b(req, "trust").unwrap_or(false) {
+        return Err(Error::Refused(format!(
+            "{from} ({}) is not an identity you have exchanged secrets with before; compare it with what they see in `pit identity`, then confirm it",
+            got.from_name
+        )));
+    }
+    let name = o(req, "as")
+        .map(String::from)
+        .unwrap_or_else(|| got.item.name.clone());
+    valid_name("secret", &name)?;
+    if got.item.value.is_empty() {
+        return invalid("the shared value is empty");
+    }
+    if let Some(f) = &got.item.filename {
+        if !crate::model::safe_relative(f) {
+            return invalid(format!("{f} is not a safe file name"));
+        }
+    }
+    guard_one_way(s, caller, &sc, &name, req)?;
+    let keys = &s.keys;
+    let map = s.lib.secrets_mut(&sc)?;
+    let replaced = match map.get_mut(&name) {
+        Some(sec) if sec.is_set() && !overwrite => {
+            return Err(Error::Exists(format!(
+                "{name} in {sc} already has a value — use --replace (the old value stays in history) or --as NEW_NAME"
+            )))
+        }
+        Some(sec) => {
+            if let Kind::Text = sec.kind {
+                if std::str::from_utf8(&got.item.value).is_err() {
+                    return invalid(format!("{name} in {sc} holds text, but the shared value is a file"));
+                }
+            }
+            values::set(keys, sec, &got.item.value)?;
+            if sec.description.is_empty() {
+                sec.description = got.item.description.clone();
+            }
+            sec.is_set()
+        }
+        None => {
+            let kind = match &got.item.filename {
+                Some(f) => Kind::File { filename: f.clone() },
+                None if std::str::from_utf8(&got.item.value).is_ok() => Kind::Text,
+                None => return invalid("the shared value is binary but has no file name"),
+            };
+            let mut sec = new_secret(&name, Protection::Sealed, kind);
+            sec.description = got.item.description.clone();
+            values::set(keys, &mut sec, &got.item.value)?;
+            map.insert(name.clone(), sec);
+            false
+        }
+    };
+    let meta = secret_meta(&map[&name]);
+    if known.is_none() {
+        s.lib.contacts.insert(
+            from.clone(),
+            Contact {
+                name: got.from_name.clone(),
+                added: now(),
+            },
+        );
+    }
+    s.save()?;
+    // The window has done its job. Its key goes now, so this share — and any
+    // copy of it — can never be opened again.
+    s.inbox.retain(|w| w.key.public_key().to_bytes() != window);
+    s.audit(
+        "share.accept",
+        &caller.actor,
+        json!({"scope": sc.to_string(), "name": name, "fp": meta.get("fp"), "from": from, "from_name": got.from_name, "replaced": replaced}),
+    );
+    Ok(
+        json!({"secret": meta, "scope": sc.to_string(), "from": known.unwrap_or(got.from_name.clone()), "replaced": replaced}),
     )
 }

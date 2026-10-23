@@ -28,6 +28,9 @@ configure them. If you are an AI assistant, read **Rules** first.
    there (names and places, never values), then ask the person to run `pit scan <folder>` or
    `pit import env <file> --to PROJECT/CHANNEL` in their terminal. Do not read the `.env` files
    yourself, and do not edit the project to remove them until the person says the pit has them.
+10. **To give a secret to another person**, tell the person to use `pit receive` / `pit share` in
+    their terminals ([sharing.md](sharing.md)). You cannot share, open receive windows or save shares,
+    and you should never carry a secret between people yourself.
 
 ## MCP server
 

@@ -25,6 +25,10 @@ pub struct Library {
     pub connections: BTreeMap<String, Connection>,
     #[serde(default)]
     pub mfa: Mfa,
+    /// People this vault has shared secrets with, by identity key (`PIT-ID-…`).
+    /// An identity is added once the owner has confirmed it belongs to that person.
+    #[serde(default)]
+    pub contacts: BTreeMap<String, Contact>,
     #[serde(default)]
     pub last_password_unlock: i64,
     /// The newest audit entry when the library was last saved.
@@ -41,6 +45,12 @@ pub struct Owner {
     #[serde(with = "b64")]
     pub identity_secret: Vec<u8>,
     pub created: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Contact {
+    pub name: String,
+    pub added: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -117,15 +127,20 @@ pub struct Project {
     pub channels: BTreeMap<String, Channel>,
 }
 
+/// A channel. Channels nest: `production/eu/fra` is a channel inside
+/// `production/eu`, inside `production`. A project keeps every channel in one
+/// map keyed by its full path, and `name` is that path.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Channel {
     pub name: String,
     #[serde(default)]
     pub description: String,
-    /// Project-level secrets are visible in this channel unless it overrides them.
+    /// The parent's secrets (the project's, for a top-level channel) are visible
+    /// in this channel unless it overrides them.
     #[serde(default = "yes")]
     pub inherit: bool,
     /// Protected channels (production) need an approval for every push and reveal.
+    /// Every channel inside a protected channel is protected too.
     #[serde(default)]
     pub protected: bool,
     #[serde(default)]
@@ -302,9 +317,42 @@ pub fn safe_relative(name: &str) -> bool {
             .all(|c| matches!(c, std::path::Component::Normal(_)))
 }
 
+/// A channel path: one or more slugs joined by `/` (`production/eu/fra`).
+pub fn valid_channel(s: &str) -> Result<()> {
+    if s.is_empty() || s.len() > 512 {
+        return invalid(format!("channel name '{s}' must be 1 to 512 characters"));
+    }
+    s.split('/').try_for_each(|seg| valid_slug("channel", seg))
+}
+
+/// The channel a channel sits in: `production/eu` for `production/eu/fra`.
+pub fn parent_channel(c: &str) -> Option<&str> {
+    c.rsplit_once('/').map(|(p, _)| p)
+}
+
+/// A channel and every channel above it, outermost first:
+/// `a/b/c` → `a`, `a/b`, `a/b/c`.
+pub fn channel_lineage(c: &str) -> Vec<&str> {
+    c.match_indices('/')
+        .map(|(i, _)| &c[..i])
+        .chain(std::iter::once(c))
+        .collect()
+}
+
+/// Whether `c` is `ancestor` itself or sits somewhere inside it.
+pub fn within(c: &str, ancestor: &str) -> bool {
+    c == ancestor
+        || c.strip_prefix(ancestor)
+            .map(|r| r.starts_with('/'))
+            .unwrap_or(false)
+}
+
 pub fn valid_slug(kind: &str, s: &str) -> Result<()> {
+    // `.` and `..` are refused: names also become folder names in exports.
     let ok = !s.is_empty()
         && s.len() <= 64
+        && s != "."
+        && s != ".."
         && s.chars()
             .all(|c| c.is_ascii_alphanumeric() || "_-.".contains(c));
     if ok {
@@ -369,7 +417,7 @@ pub enum Scope {
 }
 
 impl Scope {
-    /// Parses `global`, `<project>` or `<project>/<channel>`.
+    /// Parses `global`, `<project>` or `<project>/<channel>[/<channel>…]`.
     pub fn parse(s: &str) -> Result<Scope> {
         if s == "global" || s == "@" {
             return Ok(Scope::Global);
@@ -377,7 +425,7 @@ impl Scope {
         match s.split_once('/') {
             Some((p, c)) => {
                 valid_slug("project", p)?;
-                valid_slug("channel", c)?;
+                valid_channel(c)?;
                 Ok(Scope::Channel(p.into(), c.into()))
             }
             None => {
@@ -434,10 +482,64 @@ impl Library {
             .ok_or_else(|| crate::error::Error::NotFound(format!("channel {p}/{c}")))
     }
 
+    /// A channel is protected if it, or any channel it sits in, is.
+    pub fn channel_protected(&self, p: &str, c: &str) -> bool {
+        channel_lineage(c)
+            .into_iter()
+            .any(|a| self.channel(p, a).map(|ch| ch.protected).unwrap_or(false))
+    }
+
+    /// The scopes whose secrets a channel sees, outermost first, so that a
+    /// nearer scope's secret overrides a farther one of the same name. The
+    /// chain climbs while each channel inherits: the channel, its parent, and
+    /// so on up to the project.
+    pub fn channel_sees(&self, p: &str, c: &str) -> Result<Vec<Scope>> {
+        let mut out = vec![];
+        let mut at = c;
+        loop {
+            let ch = self.channel(p, at)?;
+            out.push(Scope::Channel(p.into(), at.into()));
+            if !ch.inherit {
+                break;
+            }
+            match parent_channel(at) {
+                Some(up) => at = up,
+                None => {
+                    out.push(Scope::Project(p.into()));
+                    break;
+                }
+            }
+        }
+        out.reverse();
+        Ok(out)
+    }
+
     pub fn channel_mut(&mut self, p: &str, c: &str) -> Result<&mut Channel> {
         self.project_mut(p)?
             .channels
             .get_mut(c)
             .ok_or_else(|| crate::error::Error::NotFound(format!("channel {p}/{c}")))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn channel_paths() {
+        assert!(valid_channel("production/eu/fra").is_ok());
+        assert!(valid_channel("production//fra").is_err());
+        assert!(valid_channel("production/").is_err());
+        assert!(valid_channel("../x").is_err());
+        assert_eq!(channel_lineage("a/b/c"), vec!["a", "a/b", "a/b/c"]);
+        assert_eq!(channel_lineage("a"), vec!["a"]);
+        assert_eq!(parent_channel("a/b/c"), Some("a/b"));
+        assert_eq!(parent_channel("a"), None);
+        assert!(within("a/b", "a") && within("a", "a") && !within("ab", "a"));
+        assert_eq!(
+            Scope::parse("app/a/b/c").unwrap(),
+            Scope::Channel("app".into(), "a/b/c".into())
+        );
     }
 }

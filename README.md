@@ -221,9 +221,21 @@ pit myapp/development> push
 pit myapp/development> log -n 5
 ```
 
-**Tab** completes commands, flags, and project, channel, secret and destination names (never
-values). `help COMMAND` explains a command, and a mistyped command gets suggestions —
-`view`, `show` and `get` all work for `reveal`.
+**Tab** completes everything: commands, flags, flag values (protections, kinds, durations…), and
+project, channel, secret, destination, connection and contact names, each with a short description —
+never values. Nested channels complete one level at a time. As you type, a greyed **hint** shows the
+rest of the word (→ accepts it) or what the command expects next. `help COMMAND` explains a command,
+and a mistyped command gets suggestions — `view`, `show` and `get` all work for `reveal`.
+
+The same completion works in your shell:
+
+```sh
+eval "$(pit completions zsh)"      # in ~/.zshrc  (bash: ~/.bashrc)
+pit completions fish | source      # in ~/.config/fish/config.fish
+```
+
+In a folder linked with `pit link`, secret names complete without typing the channel. Completion
+only reads names, and pressing Tab does not keep an unlocked pit from locking itself when idle.
 
 ## Uninstall
 

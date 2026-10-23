@@ -1,8 +1,10 @@
 //! Which secrets a channel sees, and which of them a destination receives.
 //!
-//! A channel sees its own secrets, then (if it inherits) its project's, and a
-//! channel secret overrides a project secret of the same name. Global secrets
-//! are only included where a destination names them (`global:NAME`).
+//! A channel sees its own secrets and, while it inherits, those of the channel
+//! it sits in, that channel's parent, and so on up to the project. The nearest
+//! one wins: a channel secret overrides a parent's or the project's secret of
+//! the same name. Global secrets are only included where a destination names
+//! them (`global:NAME`).
 
 use std::collections::BTreeMap;
 
@@ -19,16 +21,11 @@ pub fn channel_view<'a>(
     project: &str,
     channel: &str,
 ) -> Result<BTreeMap<String, Visible<'a>>> {
-    let p = lib.project(project)?;
-    let c = lib.channel(project, channel)?;
     let mut out = BTreeMap::new();
-    if c.inherit {
-        for (k, s) in &p.secrets {
+    for sc in lib.channel_sees(project, channel)? {
+        for (k, s) in lib.secrets(&sc)? {
             out.insert(k.clone(), Visible { secret: s });
         }
-    }
-    for (k, s) in &c.secrets {
-        out.insert(k.clone(), Visible { secret: s });
     }
     Ok(out)
 }

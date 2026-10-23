@@ -10,10 +10,12 @@ The Pit
     ├── project secrets            seen by every channel that inherits
     └── channel "production"  [protected]
         ├── channel secrets        override project secrets of the same name
-        └── destinations           where this channel's secrets go
-            ├── api          → fly:myapp-api
-            ├── web          → vercel:myapp-web@production
-            └── github       → github:owner/myapp#production
+        ├── destinations           where this channel's secrets go
+        │   ├── api          → fly:myapp-api
+        │   ├── web          → vercel:myapp-web@production
+        │   └── github       → github:owner/myapp#production
+        └── channel "eu"           production/eu — channels nest, as deep as you like
+            └── channel "fra"      production/eu/fra
 ```
 
 ### Project
@@ -25,11 +27,20 @@ A named space for one application (or a family of them). It holds secrets and ch
 One environment of a project — `production`, `staging`, `development`, or anything else
 (`bamboo-forest` for a Slack workspace, `45AP2VZPHM` for an Apple team).
 
-- **Inherits** by default: it sees the project's secrets, and its own secrets override them.
-  `pit channel add myapp/sandbox --no-inherit` makes a channel that sees only its own.
+- **Nests**: a channel can hold channels, to any depth — `myapp/production/eu/fra` is `fra`, inside
+  `eu`, inside `production`. `pit channel add myapp/production/eu/fra` creates any missing channels
+  above it. Every command that takes `PROJECT/CHANNEL` takes a nested path the same way.
+- **Inherits** by default: it sees the secrets of the channel it sits in — which sees its parent's,
+  and so on up to the project — and the nearest one wins, so its own secrets override everything
+  above. `pit channel add myapp/sandbox --no-inherit` makes a channel that sees only its own; a
+  channel that does not inherit also cuts off everything above it for the channels inside it.
 - **Protected** channels ask for your approval on every push and every reveal.
-  `production` is protected automatically; protect any other with `--protected`. A project secret
-  that a protected channel inherits is protected too: changing it asks for approval.
+  `production` is protected automatically; protect any other with `--protected`. **Every channel
+  inside a protected channel is protected too**, and cannot be unprotected while its parent is. A
+  secret that a protected channel inherits (from the project or a channel above it) is protected
+  too: changing it asks for approval.
+- **Renaming** a channel (`pit channel edit myapp/staging --rename stage`) moves the channels
+  inside it along. **Removing** one that holds channels needs `--recursive`.
 - An unprotected channel **cannot push to an address a protected channel uses** — staging can never
   overwrite production's Fly app, Vercel target, GitHub environment or file, even by mistake.
 
@@ -41,7 +52,7 @@ A named value with an optional description. It lives in exactly one **scope**:
 | --- | --- | --- |
 | global | `global` | destinations that name it as `global:NAME` |
 | project | `myapp` | every inheriting channel of `myapp` |
-| channel | `myapp/production` | that channel only |
+| channel | `myapp/production` | that channel, and the channels inside it that inherit |
 
 A secret can be **declared** without a value (`pit declare`), so a project can list what it needs
 before anyone has it. `pit needs` lists everything still empty.

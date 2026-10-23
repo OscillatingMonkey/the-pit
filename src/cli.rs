@@ -6,6 +6,7 @@ use std::collections::BTreeMap;
 use std::io::{IsTerminal, Read, Write};
 use std::path::{Path, PathBuf};
 
+use clap::builder::{PossibleValue, PossibleValuesParser};
 use clap::{Args, Parser, Subcommand};
 use serde_json::{json, Value};
 use zeroize::Zeroizing;
@@ -48,15 +49,24 @@ pub enum Cmd {
         ai: bool,
     },
     /// Approve a pending request (from an AI client or another terminal).
-    Approve { ticket: Option<String> },
+    Approve {
+        /// The ticket to approve (from `pit approvals`); omitted, the oldest.
+        ticket: Option<String>,
+    },
     /// List requests waiting for approval.
     Approvals,
 
     /// Show projects, channels, secrets (names and fingerprints only) and destinations.
     #[command(visible_alias = "list")]
-    Ls { target: Option<String> },
+    Ls {
+        /// Only this project or PROJECT/CHANNEL[/CHANNEL…]
+        target: Option<String>,
+    },
     /// Secrets that are declared but still empty.
-    Needs { project: Option<String> },
+    Needs {
+        /// Only this project.
+        project: Option<String>,
+    },
     /// Manage projects.
     #[command(subcommand)]
     Project(ProjectCmd),
@@ -79,11 +89,13 @@ pub enum Cmd {
     /// Delete a secret.
     #[command(visible_aliases = ["delete", "remove"])]
     Rm {
+        /// [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
         #[arg(num_args = 1..=2)]
         args: Vec<String>,
     },
     /// Move a secret to another scope (global, a project, or project/channel).
     Mv {
+        /// [SCOPE] NAME TO — move NAME from SCOPE (or the linked channel) to TO
         #[arg(num_args = 2..=3)]
         args: Vec<String>,
     },
@@ -92,11 +104,13 @@ pub enum Cmd {
     Reveal(RevealArgs),
     /// Check a candidate value against a secret without revealing it (works for one-way secrets).
     Verify {
+        /// [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
         #[arg(num_args = 1..=2)]
         args: Vec<String>,
     },
     /// Put a secret's previous value back.
     Rollback {
+        /// [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
         #[arg(num_args = 1..=2)]
         args: Vec<String>,
     },
@@ -109,23 +123,35 @@ pub enum Cmd {
     /// List connections.
     Connections,
     /// Remove a connection.
-    Disconnect { name: String },
+    Disconnect {
+        /// The connection to remove.
+        name: String,
+    },
 
     /// Push a channel's secrets to its destinations.
     Push(PushArgs),
     /// Compare what a channel holds with what each destination has (names only).
-    Diff { target: Option<String> },
+    Diff {
+        /// PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
+        target: Option<String>,
+    },
     /// Bring values a tool wrote into a rendered file back into the pit.
     Absorb {
+        /// PROJECT/CHANNEL[/CHANNEL…] whose rendered file to read back
         target: String,
+        /// The file destination to read back from.
         destination: String,
+        /// Show what would happen; change nothing.
         #[arg(long)]
         dry_run: bool,
     },
     /// Run a program with a channel's secrets in its environment (nothing written to disk).
     Run(RunArgs),
     /// Link the current folder to a project/channel (writes .pit.toml, no secrets).
-    Link { target: String },
+    Link {
+        /// PROJECT or PROJECT/CHANNEL[/CHANNEL…] this folder uses
+        target: String,
+    },
 
     /// The audit log: every push, reveal, unlock and change.
     Log(LogArgs),
@@ -134,7 +160,9 @@ pub enum Cmd {
     Backup(BackupCmd),
     /// Encrypt any file with a passphrase.
     Seal {
+        /// The file to encrypt.
         file: PathBuf,
+        /// Where to write it (default: FILE.pitsealed).
         #[arg(long)]
         out: Option<PathBuf>,
         /// Remove the original after sealing.
@@ -143,7 +171,9 @@ pub enum Cmd {
     },
     /// Decrypt a file made by `pit seal`.
     Unseal {
+        /// A .pitsealed file.
         file: PathBuf,
+        /// Where to write the decrypted file.
         #[arg(long)]
         out: Option<PathBuf>,
     },
@@ -159,19 +189,36 @@ pub enum Cmd {
     #[command(subcommand)]
     Mfa(MfaCmd),
     /// Touch ID quick unlock on this Mac (on|off).
-    QuickUnlock { state: String },
+    QuickUnlock {
+        /// on or off
+        #[arg(value_parser = on_off_values())]
+        state: String,
+    },
     /// Show or change settings (session length, idle lock, …).
     Settings {
+        /// The setting to show or change; omitted, all of them.
         key: Option<String>,
+        /// Its new value (durations like 15m work for *_secs).
         value: Option<String>,
     },
     /// Earlier versions of the whole library, and restoring one.
     History {
+        /// Put this version back (a number from the list).
         #[arg(long)]
         restore: Option<u64>,
     },
-    /// Your identity key, for receiving bundles from someone else.
+    /// Your identity key, for receiving bundles and shared secrets from someone else.
     Identity,
+    /// Share one secret with someone's vault. It travels encrypted; nobody sees the value.
+    Share(ShareArgs),
+    /// Receive a shared secret: open a receive window, or save a share into your vault.
+    Receive(ReceiveArgs),
+    /// People you have shared secrets with, and their identity keys.
+    Contacts {
+        /// Forget a contact (by name or identity); you will be asked to confirm them again.
+        #[arg(long)]
+        forget: Option<String>,
+    },
     /// Last resort: dump everything out, or destroy the vault.
     #[command(subcommand)]
     Emergency(EmergencyCmd),
@@ -182,7 +229,11 @@ pub enum Cmd {
     /// Look through a project for secrets and offer to copy them in. Never edits the project.
     Scan(ScanArgs),
     /// Run The Pit's agent as a login service (launchd / systemd).
-    Service { action: String },
+    Service {
+        /// install | uninstall | status | restart
+        #[arg(value_parser = service_actions())]
+        action: String,
+    },
     /// Health check: permissions, agent, factors, backups, leftovers.
     Doctor,
     /// Run the MCP server on stdio (for AI assistants).
@@ -191,17 +242,150 @@ pub enum Cmd {
     McpConfig,
     /// Run the agent in the foreground.
     Agent {
+        /// Stay in the foreground and log to the terminal.
         #[arg(long)]
         foreground: bool,
     },
     /// Open the interactive console.
     Console,
+    /// Print Tab completion for your shell: eval "$(pit completions zsh)" (or bash; fish: | source).
+    Completions {
+        /// zsh | bash | fish
+        #[arg(value_parser = shells())]
+        shell: String,
+    },
+    #[command(hide = true, name = "__complete")]
+    Complete {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        words: Vec<String>,
+    },
     #[command(hide = true)]
     ClipClear { secs: u64 },
 }
 
+fn on_off_values() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("on")
+            .help("turn it on")
+            .aliases(["true", "yes", "enable"]),
+        PossibleValue::new("off")
+            .help("turn it off")
+            .aliases(["false", "no", "disable"]),
+    ])
+}
+
+fn protections() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("sealed")
+            .help("two-way: encrypted, pushable, revealable with approval (default)")
+            .aliases(["two-way", "encrypted"]),
+        PossibleValue::new("hashed")
+            .help("one-way: only verifiable, never pushed or revealed")
+            .aliases(["one-way", "hash"]),
+        PossibleValue::new("plain")
+            .help("not sensitive: readable whenever the pit is open")
+            .aliases(["plaintext", "text"]),
+    ])
+}
+
+fn charsets() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("base64url").help("letters, digits, - and _ (default)"),
+        PossibleValue::new("alnum").help("letters and digits"),
+        PossibleValue::new("hex").help("0-9 a-f"),
+        PossibleValue::new("symbols").help("letters, digits and punctuation"),
+    ])
+}
+
+fn dest_kinds() -> PossibleValuesParser {
+    PossibleValuesParser::new(
+        crate::rail::KINDS
+            .iter()
+            .map(|k| PossibleValue::new(k.kind).help(k.summary)),
+    )
+}
+
+fn connect_kinds() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("vercel").help("Vercel, with a token"),
+        PossibleValue::new("github").help("GitHub, with a token or the gh CLI"),
+        PossibleValue::new("fly").help("Fly.io, with a token or flyctl"),
+    ])
+}
+
+fn target_kinds() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("dir").help("a folder: iCloud Drive, Dropbox, an external disk"),
+        PossibleValue::new("ssh").help("another computer or a server, over SSH"),
+        PossibleValue::new("s3").help("S3-compatible storage: AWS, R2, B2, MinIO"),
+        PossibleValue::new("rclone").help("Google Drive, OneDrive and more, via rclone"),
+    ])
+}
+
+fn service_actions() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("install").help("start the agent at login"),
+        PossibleValue::new("uninstall").help("stop starting it at login"),
+        PossibleValue::new("status").help("is it installed and running"),
+        PossibleValue::new("restart").help("restart the agent"),
+    ])
+}
+
+fn shells() -> PossibleValuesParser {
+    PossibleValuesParser::new([
+        PossibleValue::new("zsh").help(r#"eval "$(pit completions zsh)" in ~/.zshrc"#),
+        PossibleValue::new("bash").help(r#"eval "$(pit completions bash)" in ~/.bashrc"#),
+        PossibleValue::new("fish").help("pit completions fish | source, in config.fish"),
+    ])
+}
+
+#[derive(Args, Debug)]
+pub struct ShareArgs {
+    /// [SCOPE] NAME
+    #[arg(num_args = 1..=2)]
+    args: Vec<String>,
+    /// The recipient's receive request (PIT-RQ-…, from their `pit receive`), or a file holding it.
+    #[arg(long)]
+    to: String,
+    /// Write the share to this file instead of printing it.
+    #[arg(long)]
+    out: Option<PathBuf>,
+    /// Do not ask about a recipient you have not shared with before (compare their identity first).
+    #[arg(long)]
+    trust: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ReceiveArgs {
+    /// A share (PIT-SH-…), a file holding one, or - to read it from standard input.
+    /// Without one, opens a receive window and prints the request to give the sender.
+    share: Option<String>,
+    /// Where to save it: global, PROJECT or PROJECT/CHANNEL (default: the linked channel).
+    #[arg(long)]
+    into: Option<String>,
+    /// Save it under another name.
+    #[arg(long = "as")]
+    rename: Option<String>,
+    /// Replace an existing value (the old one stays in history).
+    #[arg(long)]
+    replace: bool,
+    /// Do not ask about a sender you have not exchanged secrets with before (compare their identity first).
+    #[arg(long)]
+    trust: bool,
+    /// How long the receive window stays open, e.g. 5m, 1h (max 24h). Locking the pit closes it.
+    #[arg(long = "for", default_value = "15m")]
+    dur: String,
+    /// List open receive windows.
+    #[arg(long)]
+    list: bool,
+    /// Close a receive window now (by id), or all of them.
+    #[arg(long, num_args = 0..=1, default_missing_value = "")]
+    cancel: Option<String>,
+}
+
 #[derive(Args, Debug)]
 pub struct InitArgs {
+    /// Your name, shown to people you share secrets with.
     #[arg(long)]
     name: Option<String>,
     /// Do not require Touch ID as a second factor.
@@ -221,58 +405,84 @@ pub struct UnlockArgs {
 
 #[derive(Subcommand, Debug)]
 pub enum ProjectCmd {
+    /// Create a project.
     Add {
+        /// The new project's name.
         name: String,
+        /// What it is for (shown in listings and to AI assistants).
         #[arg(short, long)]
         description: Option<String>,
         /// Channels to create, e.g. production,staging,development
         #[arg(long, value_delimiter = ',')]
         channels: Vec<String>,
     },
+    /// List projects.
     List,
+    /// Rename a project or change its description.
     Edit {
+        /// The project to change.
         name: String,
+        /// Its new name.
         #[arg(long)]
         rename: Option<String>,
+        /// What it is for (shown in listings and to AI assistants).
         #[arg(short, long)]
         description: Option<String>,
     },
+    /// Delete a project with all its channels and secrets.
     Rm {
+        /// The project to delete, with all its channels and secrets.
         name: String,
     },
 }
 
 #[derive(Subcommand, Debug)]
 pub enum ChannelCmd {
-    /// pit channel add PROJECT/NAME
+    /// Add a channel. Channels nest: PROJECT/production/eu/fra (missing parents are created).
     Add {
+        /// PROJECT/CHANNEL, or PROJECT/CHANNEL/CHANNEL/… for a channel inside another
         target: String,
+        /// What this channel is for.
         #[arg(short, long)]
         description: Option<String>,
         /// Require approval for every push and reveal (default for `production`).
+        /// Channels inside a protected channel are always protected.
         #[arg(long)]
         protected: bool,
+        /// Do not protect it, even if it is named `production`.
         #[arg(long)]
         unprotected: bool,
-        /// Do not see the project's own secrets.
+        /// Do not see the secrets of the channel (or project) it sits in.
         #[arg(long)]
         no_inherit: bool,
     },
+    /// Change a channel's description, protection, inheritance or name.
     Edit {
+        /// PROJECT/CHANNEL[/CHANNEL…]
         target: String,
+        /// What this channel is for.
         #[arg(short, long)]
         description: Option<String>,
+        /// Require approval for every push and reveal.
         #[arg(long)]
         protected: bool,
+        /// Stop requiring approval (not possible inside a protected channel).
         #[arg(long)]
         unprotected: bool,
+        /// See the secrets of the channel (or project) it sits in: true or false.
         #[arg(long)]
         inherit: Option<bool>,
+        /// New last part of its name; channels inside it move along.
         #[arg(long)]
         rename: Option<String>,
     },
+    /// Delete a channel and its secrets.
     Rm {
+        /// PROJECT/CHANNEL[/CHANNEL…]
         target: String,
+        /// Also delete every channel inside it.
+        #[arg(long)]
+        recursive: bool,
     },
 }
 
@@ -288,45 +498,57 @@ pub struct SetArgs {
     #[arg(long)]
     generate: Option<u64>,
     /// Alphabet for --generate: base64url (default), alnum, hex, symbols.
-    #[arg(long)]
+    #[arg(long, value_parser = charsets())]
     charset: Option<String>,
+    /// What it is for (shown in listings and to AI assistants).
     #[arg(short, long)]
     description: Option<String>,
     /// sealed (two-way, default) | hashed (one-way) | plain
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = protections())]
     protection: Option<String>,
+    /// Tags (comma-separated), for choosing secrets by tag.
     #[arg(long, value_delimiter = ',')]
     tag: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct DeclareArgs {
+    /// [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
     #[arg(num_args = 1..=2)]
     args: Vec<String>,
+    /// What it is for (shown in listings and to AI assistants).
     #[arg(short, long)]
     description: Option<String>,
-    #[arg(short, long)]
+    /// sealed (two-way, default) | hashed (one-way) | plain
+    #[arg(short, long, value_parser = protections())]
     protection: Option<String>,
+    /// Tags (comma-separated), for choosing secrets by tag.
     #[arg(long, value_delimiter = ',')]
     tag: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct EditArgs {
+    /// [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
     #[arg(num_args = 1..=2)]
     args: Vec<String>,
+    /// Its new name.
     #[arg(long)]
     rename: Option<String>,
-    #[arg(short, long)]
+    /// sealed (two-way, default) | hashed (one-way) | plain
+    #[arg(short, long, value_parser = protections())]
     protection: Option<String>,
+    /// Replace its tags (comma-separated).
     #[arg(long, value_delimiter = ',')]
     tags: Option<Vec<String>>,
+    /// What it is for (shown in listings and to AI assistants).
     #[arg(short, long)]
     description: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct RevealArgs {
+    /// [SCOPE] NAME — scope is global, PROJECT or PROJECT/CHANNEL[/CHANNEL…] (defaults to .pit.toml)
     #[arg(num_args = 1..=2)]
     args: Vec<String>,
     /// Copy to the clipboard (cleared automatically) instead of printing.
@@ -341,12 +563,18 @@ pub struct RevealArgs {
 pub enum DestCmd {
     /// pit dest add PROJECT/CHANNEL NAME --kind fly --set app=my-app
     Add(DestArgs),
+    /// Change a destination: kind, settings, selection, connection.
     Edit(DestArgs),
+    /// Remove a destination.
     Rm {
+        /// PROJECT/CHANNEL[/CHANNEL…] the destination belongs to
         target: String,
+        /// The destination to remove.
         name: String,
     },
+    /// List destinations.
     List {
+        /// Only this PROJECT/CHANNEL[/CHANNEL…]
         target: Option<String>,
     },
     /// What each kind of destination takes.
@@ -355,9 +583,12 @@ pub enum DestCmd {
 
 #[derive(Args, Debug)]
 pub struct DestArgs {
+    /// PROJECT/CHANNEL[/CHANNEL…] the destination belongs to
     target: String,
+    /// The destination's name.
     name: String,
-    #[arg(long)]
+    /// Where it pushes: fly, vercel, github, dotenv, files or command.
+    #[arg(long, value_parser = dest_kinds())]
     kind: Option<String>,
     /// key=value (repeatable). Values may reference channel secrets as {NAME}.
     #[arg(long = "set")]
@@ -365,8 +596,10 @@ pub struct DestArgs {
     /// Which secrets: *, tag:<t>, NAME, "NAME as ALIAS", global:NAME, !NAME (repeatable).
     #[arg(long)]
     select: Vec<String>,
+    /// The connection whose access it uses (default: the one named after its kind).
     #[arg(long)]
     connection: Option<String>,
+    /// What it is for (shown in listings and to AI assistants).
     #[arg(short, long)]
     description: Option<String>,
 }
@@ -374,7 +607,9 @@ pub struct DestArgs {
 #[derive(Args, Debug)]
 pub struct ConnectArgs {
     /// vercel | github | fly
+    #[arg(value_parser = connect_kinds())]
     kind: Option<String>,
+    /// A name for this connection (default: its kind).
     #[arg(long)]
     name: Option<String>,
     /// Borrow the vendor CLI's own sign-in instead of storing a token (github, fly).
@@ -394,11 +629,13 @@ pub struct PushArgs {
     target: Option<String>,
     /// Only these destinations.
     destinations: Vec<String>,
+    /// Show what would happen; change nothing.
     #[arg(long)]
     dry_run: bool,
     /// Overwrite local files even if they hold values the pit does not.
     #[arg(long)]
     force: bool,
+    /// Push without asking first.
     #[arg(short, long)]
     yes: bool,
 }
@@ -414,19 +651,23 @@ pub struct RunArgs {
     /// Use a destination's selection.
     #[arg(long)]
     dest: Option<String>,
+    /// The program to run, and its arguments, after --
     #[arg(trailing_var_arg = true, required = true)]
     command: Vec<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct LogArgs {
+    /// How many entries to show.
     #[arg(short = 'n', long, default_value_t = 30)]
     limit: u64,
+    /// Only entries about this project.
     #[arg(long)]
     project: Option<String>,
     /// push | reveal | unlock | …
     #[arg(long)]
     event: Option<String>,
+    /// Print JSON.
     #[arg(long)]
     json: bool,
 }
@@ -438,22 +679,32 @@ pub enum BackupCmd {
     Status,
     /// Send the current vault to every target that does not have it yet.
     Sync {
+        /// Print nothing unless something fails.
         #[arg(long)]
         quiet: bool,
     },
     /// Send a fresh snapshot to every target (or --to some) right now.
     Now {
+        /// Only these targets (repeatable).
         #[arg(long = "to")]
         to: Vec<String>,
+        /// Print nothing unless something fails.
         #[arg(long)]
         quiet: bool,
     },
     /// Add a remote or local backup target.
     Target(TargetArgs),
     /// Remove a backup target.
-    Untarget { name: String },
+    Untarget {
+        /// The target to remove (its backups stay where they are).
+        name: String,
+    },
     /// Back up after every change: on (default) or off.
-    Auto { state: String },
+    Auto {
+        /// on or off
+        #[arg(value_parser = on_off_values())]
+        state: String,
+    },
     /// Every backup on every target, newest first.
     List {
         /// Only this target, or one written out: dir:PATH, ssh:USER@HOST:PATH, rclone:REMOTE:PATH
@@ -466,6 +717,7 @@ pub enum BackupCmd {
         a: String,
         /// Another backup; omitted, the comparison is with the vault as it is now.
         b: Option<String>,
+        /// Look for backups only on this target.
         #[arg(long)]
         from: Option<String>,
         /// Ask for the password the backup was made with (for a backup of a different vault).
@@ -474,8 +726,10 @@ pub enum BackupCmd {
     },
     /// Export chosen projects (or everything) as an encrypted bundle.
     Bundle {
+        /// Projects to include (repeatable); none means everything.
         #[arg(long = "project")]
         projects: Vec<String>,
+        /// Where to write the bundle.
         #[arg(long)]
         out: PathBuf,
         /// Also protect it with a passphrase (so it opens without this vault).
@@ -484,14 +738,18 @@ pub enum BackupCmd {
         /// Encrypt it to someone's identity (from `pit identity`).
         #[arg(long)]
         to_identity: Option<String>,
+        /// Include connections (the access tokens destinations use).
         #[arg(long)]
         with_connections: bool,
     },
     /// Import a bundle into this vault.
     Import {
+        /// The bundle to import.
         file: PathBuf,
+        /// Open it with its passphrase (asked for).
         #[arg(long)]
         passphrase: bool,
+        /// Replace values you already have with the bundle's.
         #[arg(long)]
         replace: bool,
         /// Also take the bundle's destinations and connections. Only for bundles you made yourself.
@@ -500,19 +758,25 @@ pub enum BackupCmd {
     },
     /// Replace this vault with a backup: a number from `pit backup list`, `latest`, TARGET:N, or a .pitvault file.
     Restore {
+        /// A number from `pit backup list`, latest, TARGET:N, or a .pitvault file
         what: String,
+        /// Look for the backup only on this target.
         #[arg(long)]
         from: Option<String>,
     },
     /// Show what a snapshot or bundle contains, without opening it.
-    Inspect { file: PathBuf },
+    Inspect {
+        /// A .pitvault snapshot or .pitbundle.
+        file: PathBuf,
+    },
 }
 
 #[derive(Args, Debug)]
 pub struct TargetArgs {
+    /// A name for this target.
     name: String,
     /// dir | ssh | s3 | rclone
-    #[arg(long)]
+    #[arg(long, value_parser = target_kinds())]
     kind: String,
     /// dir: folder (iCloud Drive, Dropbox, an external disk…)
     #[arg(long)]
@@ -523,13 +787,16 @@ pub struct TargetArgs {
     /// rclone: remote:path (Google Drive, OneDrive, Dropbox, B2… via rclone)
     #[arg(long)]
     remote: Option<String>,
+    /// s3: bucket name
     #[arg(long)]
     bucket: Option<String>,
+    /// s3: region, e.g. eu-west-1 (auto for R2)
     #[arg(long)]
     region: Option<String>,
     /// s3: https://… for R2, B2, MinIO; omit for AWS
     #[arg(long)]
     endpoint: Option<String>,
+    /// s3: folder inside the bucket
     #[arg(long)]
     prefix: Option<String>,
 }
@@ -547,7 +814,11 @@ pub enum RecoveryCmd {
 #[derive(Subcommand, Debug)]
 pub enum MfaCmd {
     /// Require Touch ID after the password (on|off).
-    Touchid { state: String },
+    Touchid {
+        /// on or off
+        #[arg(value_parser = on_off_values())]
+        state: String,
+    },
     /// Enroll an authenticator app (RFC 6238).
     Totp,
     /// Remove the authenticator app.
@@ -558,6 +829,7 @@ pub enum MfaCmd {
 pub enum EmergencyCmd {
     /// Dump every secret out of the vault (needs any working way in).
     Export {
+        /// Where to write the export.
         #[arg(long)]
         out: PathBuf,
         /// Write plaintext: one folder per project/channel with .env files and files.
@@ -576,9 +848,12 @@ pub enum ImportCmd {
     Env(ImportEnvArgs),
     /// Import a folder laid out as PROJECT/ENVIRONMENT/*.env (see docs/importing.md).
     SecretPit {
+        /// The folder, laid out PROJECT/ENVIRONMENT/*.env
         dir: PathBuf,
+        /// A TOML map renaming projects, channels and secrets (see examples/).
         #[arg(long)]
         map: Option<PathBuf>,
+        /// Show what would happen; change nothing.
         #[arg(long)]
         dry_run: bool,
     },
@@ -586,13 +861,14 @@ pub enum ImportCmd {
 
 #[derive(Args, Debug)]
 pub struct ImportEnvArgs {
+    /// The .env, JSON or YAML files to read.
     #[arg(required = true)]
     files: Vec<PathBuf>,
     /// Where they go: global, PROJECT or PROJECT/CHANNEL (defaults to .pit.toml).
     #[arg(long)]
     to: Option<String>,
     /// sealed (two-way, default) | hashed (one-way) | plain
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = protections())]
     protection: Option<String>,
     /// Replace existing values that differ (old values stay in history).
     #[arg(long)]
@@ -600,8 +876,10 @@ pub struct ImportEnvArgs {
     /// Keys to leave out.
     #[arg(long, value_delimiter = ',')]
     skip: Vec<String>,
+    /// Tags (comma-separated), for choosing secrets by tag.
     #[arg(long, value_delimiter = ',')]
     tag: Vec<String>,
+    /// Show what would happen; change nothing.
     #[arg(long)]
     dry_run: bool,
 }
@@ -622,7 +900,8 @@ pub struct ScanArgs {
     /// Report as JSON (names, places and lengths — never values).
     #[arg(long)]
     json: bool,
-    #[arg(short, long)]
+    /// How to store what you pick: sealed (default), hashed or plain.
+    #[arg(short, long, value_parser = protections())]
     protection: Option<String>,
 }
 
@@ -719,6 +998,15 @@ struct Link {
     project: String,
     #[serde(default)]
     channel: Option<String>,
+}
+
+/// The scope this folder is linked to (`.pit.toml`), if any.
+pub fn link_scope() -> Option<String> {
+    let (_, l) = find_link()?;
+    Some(match l.channel {
+        Some(c) => format!("{}/{c}", l.project),
+        None => l.project,
+    })
 }
 
 fn find_link() -> Option<(PathBuf, Link)> {
@@ -1141,8 +1429,35 @@ pub fn run(cli: Cli) -> Result<i32> {
         Cmd::Identity => {
             let r = call("identity", json!({}))?;
             println!("{}", r["identity"].as_str().unwrap_or(""));
-            ui::note("share this freely: it lets someone encrypt a bundle that only you can open");
+            ui::note("share this freely: it lets someone encrypt a bundle or a secret that only you can open");
         }
+        Cmd::Share(a) => share(a)?,
+        Cmd::Completions { shell } => {
+            print!("{}", crate::complete::script(&shell).unwrap_or(""));
+        }
+        Cmd::Complete { words } => crate::complete::print_for_shell(&words),
+        Cmd::Receive(a) => receive(a)?,
+        Cmd::Contacts { forget } => match forget {
+            Some(who) => {
+                call("contact.rm", json!({"who": who}))?;
+                ui::ok(&format!("forgot {who}"));
+            }
+            None => {
+                let r = call("contact.list", json!({}))?;
+                let list = r["contacts"].as_array().cloned().unwrap_or_default();
+                if list.is_empty() {
+                    ui::note("no contacts yet — they are added when you first share with someone or receive from them");
+                }
+                for c in list {
+                    println!(
+                        "{}  {}  {}",
+                        ui::bold(c["name"].as_str().unwrap_or("")),
+                        c["identity"].as_str().unwrap_or(""),
+                        ui::dim(&format!("since {}", c["added"].as_str().unwrap_or("")))
+                    );
+                }
+            }
+        },
         Cmd::Emergency(e) => emergency(e)?,
 
         Cmd::Import(ImportCmd::Env(a)) => import_env(a)?,
@@ -1426,13 +1741,18 @@ fn ls(target: Option<&str>) -> Result<()> {
             ui::secret_line(&s, "  ");
         }
         for c in p["channels"].as_array().cloned().unwrap_or_default() {
+            let path = c["name"].as_str().unwrap_or("");
             if only_channel
                 .as_deref()
-                .map(|oc| c["name"].as_str() != Some(oc))
+                .map(|oc| !crate::model::within(path, oc))
                 .unwrap_or(false)
             {
                 continue;
             }
+            // Channels inside channels are indented under them, by their last part.
+            let depth = path.matches('/').count();
+            let pad = "  ".repeat(depth);
+            let leaf = path.rsplit('/').next().unwrap_or(path);
             let flags = format!(
                 "{}{}",
                 if c["protected"] == json!(true) {
@@ -1447,17 +1767,17 @@ fn ls(target: Option<&str>) -> Result<()> {
                 }
             );
             println!(
-                "  {}{}  {}",
-                ui::bold(&format!("/{}", c["name"].as_str().unwrap_or(""))),
+                "  {pad}{}{}  {}",
+                ui::bold(&format!("/{leaf}")),
                 flags,
                 ui::dim(c["description"].as_str().unwrap_or(""))
             );
             for s in c["secrets"].as_array().cloned().unwrap_or_default() {
-                ui::secret_line(&s, "    ");
+                ui::secret_line(&s, &format!("    {pad}"));
             }
             for d in c["destinations"].as_array().cloned().unwrap_or_default() {
                 println!(
-                    "    → {:<16} {:<8} {}  {}",
+                    "    {pad}→ {:<16} {:<8} {}  {}",
                     d["name"].as_str().unwrap_or(""),
                     d["kind"].as_str().unwrap_or(""),
                     d["address"].as_str().unwrap_or(""),
@@ -1556,6 +1876,18 @@ fn channel(c: ChannelCmd) -> Result<()> {
                 args["protected"] = json!(protected && !unprotected);
             }
             let r = call("channel.add", args)?;
+            let created = r["created"].as_array().cloned().unwrap_or_default();
+            if created.len() > 1 {
+                ui::note(&format!(
+                    "also created {}",
+                    created[..created.len() - 1]
+                        .iter()
+                        .filter_map(|c| c.as_str())
+                        .map(|c| format!("{p}/{c}"))
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ));
+            }
             ui::ok(&format!(
                 "channel {}{}",
                 r["channel"].as_str().unwrap_or(""),
@@ -1589,13 +1921,44 @@ fn channel(c: ChannelCmd) -> Result<()> {
                 r["protected"], r["inherit"]
             ));
         }
-        ChannelCmd::Rm { target } => {
+        ChannelCmd::Rm { target, recursive } => {
             let (p, n) = target_or_link(Some(&target))?;
-            if tty() && !confirm(&format!("Delete channel {p}/{n} and every secret in it?"))? {
+            // Say so before asking for approval, rather than after.
+            if !recursive {
+                let t = call("tree", json!({"project": p}))?;
+                let inside: Vec<String> = t["projects"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .flat_map(|x| x["channels"].as_array().cloned().unwrap_or_default())
+                    .filter_map(|c| c["name"].as_str().map(String::from))
+                    .filter(|c| c != &n && crate::model::within(c, &n))
+                    .collect();
+                if !inside.is_empty() {
+                    return Err(Error::Refused(format!(
+                        "{p}/{n} has channels inside it ({}); remove them first, or remove them all with --recursive",
+                        inside.join(", ")
+                    )));
+                }
+            }
+            let what = if recursive {
+                format!("Delete channel {p}/{n}, every channel inside it, and all their secrets?")
+            } else {
+                format!("Delete channel {p}/{n} and every secret in it?")
+            };
+            if tty() && !confirm(&what)? {
                 return Ok(());
             }
-            call("channel.rm", json!({"project": p, "channel": n}))?;
-            ui::ok("deleted");
+            let r = call(
+                "channel.rm",
+                json!({"project": p, "channel": n, "recursive": recursive}),
+            )?;
+            let inside = r["inside"].as_array().map(|a| a.len()).unwrap_or(0);
+            if inside > 0 {
+                ui::ok(&format!("deleted, with {inside} channel(s) inside it"));
+            } else {
+                ui::ok("deleted");
+            }
         }
     }
     Ok(())
@@ -3370,6 +3733,186 @@ pub fn unknown_command_help(word: &str, prefix: &str) -> String {
         s.push_str("\n`pit --help` lists every command, `pit COMMAND --help` explains one.");
     }
     s
+}
+
+// ---------------------------------------------------------------------------
+// sharing
+
+/// A request or share code given directly, in a file, or (`-`) on standard input.
+fn read_code(arg: &str) -> Result<String> {
+    let text = if arg == "-" {
+        let mut s = String::new();
+        std::io::stdin().read_to_string(&mut s)?;
+        s
+    } else if arg.trim().to_uppercase().starts_with("PIT-") {
+        arg.to_string()
+    } else {
+        std::fs::read_to_string(arg).map_err(|e| {
+            Error::Invalid(format!(
+                "{arg}: {e} (expected a PIT-… code or a file holding one)"
+            ))
+        })?
+    };
+    Ok(text.split_whitespace().collect())
+}
+
+/// Before the first exchange with someone, the person compares the identity
+/// key they are about to trust with what the other person sees. After that it
+/// is remembered as a contact.
+fn confirm_identity(identity: &str, name: &str, flag: bool) -> Result<bool> {
+    if flag {
+        return Ok(true);
+    }
+    ui::warn(&format!(
+        "you have not exchanged secrets with this identity before:\n  {identity}\n  (it says it is {name})"
+    ));
+    ui::note(&format!(
+        "ask {name} to run `pit identity` and check it is exactly this — on a call or in person, not over the channel this came through"
+    ));
+    if !tty() {
+        return Err(Error::Refused(
+            "an identity you have not confirmed before; compare it, then run this again with --trust".into(),
+        ));
+    }
+    if !confirm("Is it exactly the same?")? {
+        return Err(Error::Refused("nothing changed".into()));
+    }
+    Ok(true)
+}
+
+fn share(a: ShareArgs) -> Result<()> {
+    let (scope, name) = scope_name(&a.args)?;
+    let request = read_code(&a.to)?;
+    let r = call("share.check", json!({"request": request}))?;
+    let to = r["name"].as_str().unwrap_or("").to_string();
+    let trust = match r["known_as"].as_str() {
+        Some(_) => false,
+        None => confirm_identity(r["identity"].as_str().unwrap_or(""), &to, a.trust)?,
+    };
+    let r = call(
+        "share.send",
+        json!({"scope": scope, "name": name, "request": request, "trust": trust}),
+    )?;
+    let code = r["share"].as_str().unwrap_or("");
+    let left = r["expires_in"].as_u64().unwrap_or(0);
+    match &a.out {
+        Some(p) => {
+            paths::write_private(p, format!("{code}\n").as_bytes())?;
+            ui::ok(&format!("share written to {}", p.display()));
+        }
+        None => println!("{code}"),
+    }
+    ui::note(&format!(
+        "send this to {}. It opens only in their vault, only once, and only in the next {}; it is safe to send over chat or email.",
+        r["to"].as_str().unwrap_or(&to),
+        ui::dur(left)
+    ));
+    Ok(())
+}
+
+fn receive(a: ReceiveArgs) -> Result<()> {
+    if a.list {
+        let r = call("share.pending", json!({}))?;
+        let list = r["windows"].as_array().cloned().unwrap_or_default();
+        if list.is_empty() {
+            ui::note("no receive windows are open");
+        }
+        for w in list {
+            println!(
+                "{}  closes in {}",
+                w["window"].as_str().unwrap_or(""),
+                ui::dur(w["expires_in"].as_u64().unwrap_or(0))
+            );
+        }
+        return Ok(());
+    }
+    if let Some(id) = a.cancel {
+        let id = if id.is_empty() {
+            Value::Null
+        } else {
+            json!(id)
+        };
+        let r = call("share.cancel", json!({"id": id}))?;
+        ui::ok(&format!(
+            "closed {} receive window(s); shares made for them can no longer be opened",
+            r["closed"].as_u64().unwrap_or(0)
+        ));
+        return Ok(());
+    }
+    let Some(share) = a.share else {
+        let secs = parse_duration(&a.dur)?;
+        let r = call("share.request", json!({"secs": secs}))?;
+        let left = r["expires_in"].as_u64().unwrap_or(0);
+        println!("{}", r["request"].as_str().unwrap_or(""));
+        ui::note(&format!(
+            "give this to the sender (it is not secret). The window closes in {}, at {}.",
+            ui::dur(left),
+            r["expires"].as_str().unwrap_or("")
+        ));
+        if left < secs {
+            ui::note("it is shorter than asked: a window cannot outlast this unlock");
+        }
+        let idle = r["idle_secs"].as_u64().unwrap_or(0);
+        if idle < left {
+            ui::note(&format!(
+                "locking the pit, or leaving it unused for {}, closes the window too",
+                ui::dur(idle)
+            ));
+        }
+        ui::note("when the share arrives: pit receive PIT-SH-… --into PROJECT/CHANNEL");
+        return Ok(());
+    };
+    let share = read_code(&share)?;
+    let into = match a.into {
+        Some(s) => {
+            Scope::parse(&s)?;
+            s
+        }
+        None => {
+            let (p, c) = target_or_link(None)?;
+            format!("{p}/{c}")
+        }
+    };
+    let r = call("share.open", json!({"share": share}))?;
+    let from = r["from"].as_str().unwrap_or("").to_string();
+    let shared = r["name"].as_str().unwrap_or("").to_string();
+    let name = a.rename.clone().unwrap_or_else(|| shared.clone());
+    let desc = r["description"].as_str().unwrap_or("");
+    ui::note(&format!(
+        "{} shares {}{}",
+        r["known_as"].as_str().unwrap_or(&from),
+        ui::bold(&shared),
+        if desc.is_empty() {
+            String::new()
+        } else {
+            format!(" — {desc}")
+        }
+    ));
+    let trust = match r["known_as"].as_str() {
+        Some(_) => false,
+        None => confirm_identity(r["identity"].as_str().unwrap_or(""), &from, a.trust)?,
+    };
+    if tty() && !confirm(&format!("Save it as {name} in {into}?"))? {
+        return Err(Error::Refused(
+            "nothing saved; the window stays open until it times out".into(),
+        ));
+    }
+    let r = call(
+        "share.accept",
+        json!({"share": share, "scope": into, "as": a.rename, "overwrite": a.replace, "trust": trust}),
+    )?;
+    ui::ok(&format!(
+        "{} {} in {} ({}); the receive window is closed",
+        name,
+        if r["replaced"].as_bool().unwrap_or(false) {
+            "replaced"
+        } else {
+            "saved"
+        },
+        into,
+        r["secret"]["fp"].as_str().unwrap_or("")
+    ));
+    Ok(())
 }
 
 #[cfg(test)]

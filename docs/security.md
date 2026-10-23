@@ -23,7 +23,17 @@ secret values, for the audit log and for fingerprints. Secret values are encrypt
 individually, bound to their identity — they stay ciphertext in memory until a push or reveal
 needs one, and a value cannot be swapped onto another secret undetected.
 
-Every identity also gets an **X25519 key pair**, so bundles can be encrypted to a specific person.
+Every identity also gets an **X25519 key pair**, so bundles and shared secrets can be encrypted to a
+specific person.
+
+## Sharing a secret
+
+`pit share` sends one secret to another vault ([sharing.md](sharing.md)). The recipient's agent makes
+a one-time **window key** that lives only in its memory; the value is encrypted to it, authenticated
+with the sender's identity, and sealed again to the recipient's identity. A share therefore opens only
+in the confirmed recipient's vault, once, while the window is open (15 minutes by default, at most
+24 hours, and never past a lock). Sending always needs the sender's approval and is logged; the first
+exchange with someone asks both sides to compare identity keys. AI clients can do none of it.
 
 ## What is used, and why
 
@@ -38,6 +48,7 @@ Every identity also gets an **X25519 key pair**, so bundles can be encrypted to 
 | Recovery splitting | Shamir secret sharing over GF(2⁸), constant-time arithmetic |
 | Recovery codes | Crockford base32 with a checksum, so typos are caught before any key is derived |
 | GitHub secrets | libsodium sealed boxes (X25519 + XSalsa20-Poly1305), as GitHub requires |
+| Shared secrets | `crypto_box` (X25519 + XSalsa20-Poly1305) to a one-time window key, inside a sealed box to the recipient's identity |
 | Transport | HTTPS only (rustls, Mozilla roots), no redirects; local IPC over a Unix socket |
 | Passwords | NIST SP 800-63B: length over composition rules; screened for guessability (zxcvbn); ≥ 12 characters and ≥ 10¹² estimated guesses |
 | Implementations | RustCrypto crates (`argon2`, `chacha20poly1305`, `hkdf`, `hmac`, `sha2`, `crypto_box`) — no hand-rolled primitives |

@@ -158,6 +158,27 @@ pub fn agent_running() -> bool {
     connect().is_ok()
 }
 
+/// A read-only listing for completion: never starts the agent, never waits
+/// long, and never keeps a session awake (the agent treats the `complete`
+/// client that way).
+pub fn peek(op: &str) -> Option<Value> {
+    let mut s = connect().ok()?;
+    s.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    let req = Request {
+        op: op.into(),
+        args: serde_json::json!({}),
+        auth: None,
+        client: "complete".into(),
+    };
+    let mut line = serde_json::to_vec(&req).ok()?;
+    line.push(b'\n');
+    s.write_all(&line).ok()?;
+    let mut buf = String::new();
+    BufReader::new(s).read_line(&mut buf).ok()?;
+    let resp: Response = serde_json::from_str(&buf).ok()?;
+    resp.ok.then_some(resp.data)
+}
+
 /// Start the agent in the background if it is not already running.
 pub fn ensure_agent() -> Result<()> {
     if agent_running() {

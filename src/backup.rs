@@ -320,7 +320,7 @@ pub fn import_bundle(
             check_imported_secret(sec)?;
         }
         for (cn, ch) in proj.channels.iter_mut() {
-            crate::model::valid_slug("channel", cn)?;
+            crate::model::valid_channel(cn)?;
             for sec in ch.secrets.values() {
                 check_imported_secret(sec)?;
             }
