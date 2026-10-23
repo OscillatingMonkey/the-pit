@@ -16,34 +16,34 @@ regex = "1"
 # Cryptography (RustCrypto, audited primitives only)
 argon2 = { version = "0.5", features = ["std", "zeroize"] }
 chacha20poly1305 = { version = "0.10", features = ["std"] }
-hkdf = "0.12"
-hmac = "0.12"
-sha2 = "0.10"
-sha1 = "0.10"
+hkdf = "0.13"
+hmac = "0.13"
+sha2 = "0.11"
+sha1 = "0.11"
 subtle = "2.6"
 zeroize = { version = "1.8", features = ["derive"] }
 rand_core = { version = "0.6", features = ["getrandom"] }
-getrandom = "0.2"
+getrandom = "0.4"
 crypto_box = { version = "0.9", features = ["seal", "std"] }
 
 # Serialization and encoding
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-toml = "0.8"
-base64 = "0.22"
+toml = "1.1"
+base64 = "0.23"
 data-encoding = "2.6"
 hex = "0.4"
 
 # CLI and console
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
 rpassword = "7.3"
-rustyline = { version = "14", default-features = false }
+rustyline = { version = "19", default-features = false }
 shell-words = "1.1"
 zxcvbn = "3.1"
 
 # System
 libc = "0.2"
-dirs = "5"
+dirs = "7"
 time = { version = "0.3", features = ["formatting", "parsing", "macros"] }
 
 # Network (TLS only, rustls with webpki roots)
