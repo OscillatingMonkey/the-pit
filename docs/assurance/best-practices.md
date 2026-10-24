@@ -34,9 +34,9 @@ Base URL used below: `https://github.com/OscillatingMonkey/the-pit/blob/main/`
 
 | Criterion | Level | Status | Justification |
 | --- | --- | --- | --- |
-| `floss_license` | MUST | **Met** | MIT. <https://github.com/OscillatingMonkey/the-pit/blob/main/LICENSE> |
-| `floss_license_osi` | SUGGESTED | **Met** | MIT is OSI-approved. |
-| `license_location` | MUST | **Met** | `LICENSE` at the repository root; `license = "MIT"` in Cargo.toml. <https://github.com/OscillatingMonkey/the-pit/blob/main/LICENSE> |
+| `floss_license` | MUST | **Unmet** | MIT with the Commons Clause, which forbids selling the software, so it is not a FLOSS license. Met only by a license without that condition. <https://github.com/OscillatingMonkey/the-pit/blob/main/LICENSE> |
+| `floss_license_osi` | SUGGESTED | **Unmet** | The Commons Clause is not OSI-approved. |
+| `license_location` | MUST | **Met** | `LICENSE` at the repository root; `license-file = "LICENSE"` in Cargo.toml. <https://github.com/OscillatingMonkey/the-pit/blob/main/LICENSE> |
 
 ### Documentation
 
@@ -204,11 +204,12 @@ Base URL used below: `https://github.com/OscillatingMonkey/the-pit/blob/main/`
 
 | Status | Count | Criteria |
 | --- | --- | --- |
-| **Met** | 65 | All others |
-| **Unmet** | 1 | `test_most` (SUGGESTED) — pending the first published coverage figure |
+| **Met** | 63 | All others |
+| **Unmet** | 3 | `floss_license` (MUST) and `floss_license_osi` (SUGGESTED) — the Commons Clause; `test_most` (SUGGESTED) — pending the first published coverage figure |
 | **N/A** | 1 | `release_notes_vulns` |
 
-**Blocking the passing badge:** nothing. Every MUST criterion is Met or N/A. `test_most` is only
+**Blocking the passing badge:** `floss_license`. The badge requires a FLOSS license, and the Commons
+Clause makes The Pit source-available instead; the other MUST criteria are Met or N/A. `test_most` is only
 SUGGESTED; switch it to Met once the first coverage figure is published at
 <https://oscillatingmonkey.github.io/the-pit/>.
 

@@ -263,4 +263,12 @@ security problems privately, as described in [SECURITY.md](SECURITY.md), not in 
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT with the [Commons Clause](https://commonsclause.com) — see [LICENSE](LICENSE).
+
+- **Free to use**, for individuals and for companies, including at work and on commercial projects:
+  keep your own secrets in it, change it, run it on as many machines as you like, share copies.
+- **Not for sale.** You may not sell The Pit, or a product or service whose value comes entirely or
+  substantially from it — a paid copy or fork, a hosted Pit, or paid support or consulting for it.
+
+This makes The Pit source-available rather than open source in the OSI sense. Versions up to and
+including 0.1.1 were released under plain MIT, and those copies stay MIT.

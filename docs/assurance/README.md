@@ -86,8 +86,8 @@ cargo-mutants cargo-llvm-cov`).
 
 ## Not yet done
 
-- **Independent audit.** Options: free audits for open-source projects (OSTIF, the Sovereign Tech
-  Agency, NLnet-funded audits by Radically Open Security), Google OSS-Fuzz for continuous fuzzing
-  once the project is eligible, or a paid cryptography and code audit.
-- **OpenSSF Best Practices badge.** The answers are ready in [best-practices.md](best-practices.md);
-  the maintainer registers the project at <https://www.bestpractices.dev>.
+- **Independent audit.** A paid cryptography and code audit. Free programmes (OSTIF, the Sovereign
+  Tech Agency, NLnet-funded audits, Google OSS-Fuzz) generally require an OSI-approved license, which
+  the Commons Clause rules out.
+- **OpenSSF Best Practices badge.** The answers are in [best-practices.md](best-practices.md); the
+  badge requires a FLOSS license, so it is out of reach under the Commons Clause.
