@@ -21,8 +21,8 @@ change it for your own use.
 
 ## Getting one
 
-Contact the maintainer through GitHub, at <https://github.com/OscillatingMonkey>, with your company
-name and what you intend to build. Terms and pricing are agreed case by case.
+Email <bashirm251@gmail.com>, or contact the maintainer through GitHub at
+<https://github.com/OscillatingMonkey>, with your company name and what you intend to build. Terms and pricing are agreed case by case.
 
 This page explains the licensing; it is not itself a license. Only the AGPL text in
 [LICENSE](LICENSE), or a signed commercial agreement, grants rights to The Pit.
