@@ -263,12 +263,13 @@ security problems privately, as described in [SECURITY.md](SECURITY.md), not in 
 
 ## License
 
-MIT with the [Commons Clause](https://commonsclause.com) — see [LICENSE](LICENSE).
+The Pit is open source under the [GNU Affero General Public License v3.0](LICENSE) (AGPL-3.0-only),
+and also available under a [commercial license](COMMERCIAL.md).
 
-- **Free to use**, for individuals and for companies, including at work and on commercial projects:
-  keep your own secrets in it, change it, run it on as many machines as you like, share copies.
-- **Not for sale.** You may not sell The Pit, or a product or service whose value comes entirely or
-  substantially from it — a paid copy or fork, a hosted Pit, or paid support or consulting for it.
+- **AGPL (free).** Anyone (individuals and companies) can use The Pit for anything, including at
+  work, change it and share it. If you distribute it, or let people use a modified version over a
+  network, you must make your full source available to them under the AGPL too.
+- **Commercial license.** For building The Pit into a product or service without the AGPL's
+  obligations — closed-source, sold or hosted. See [COMMERCIAL.md](COMMERCIAL.md).
 
-This makes The Pit source-available rather than open source in the OSI sense. Versions up to and
-including 0.1.1 were released under plain MIT, and those copies stay MIT.
+Versions 0.1.0 and 0.1.1 were released under MIT, and those copies stay MIT.

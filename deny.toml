@@ -9,7 +9,8 @@ all-features = true
 ignore = []
 
 [licenses]
-# Permissive licenses only, compatible with distributing The Pit under MIT with the Commons Clause.
+# Permissive licenses only for dependencies, so The Pit can be distributed under the AGPL and,
+# separately, under commercial licenses.
 allow = [
     "MIT",
     "Apache-2.0",
@@ -23,14 +24,11 @@ allow = [
 ]
 confidence-threshold = 0.9
 # MPL-2.0 is file-level copyleft: fine to use unmodified from The Pit.
+# The Pit itself is AGPL-3.0-only (LICENSE), and offered under commercial terms (COMMERCIAL.md).
 exceptions = [
     { crate = "option-ext", allow = ["MPL-2.0"] },
+    { crate = "the-pit", allow = ["AGPL-3.0-only"] },
 ]
-
-# The Pit itself is MIT with the Commons Clause (LICENSE), which has no SPDX
-# identifier; the allow-list applies to its dependencies.
-[licenses.private]
-ignore = true
 
 [bans]
 multiple-versions = "allow"

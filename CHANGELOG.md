@@ -2,8 +2,9 @@
 
 ## Unreleased
 
-- License: MIT with the Commons Clause. Free to use for individuals and companies; selling The Pit,
-  or a product or service built substantially on it, is not permitted. Earlier versions stay MIT.
+- License: AGPL-3.0-only, with a commercial license available for closed-source or hosted use
+  ([COMMERCIAL.md](COMMERCIAL.md)). Contributions are accepted under the contributor agreement in
+  [CLA.md](CLA.md). Versions up to 0.1.1 stay MIT.
 - Channels nest, as deep as you like: `pit channel add myapp/production/eu/fra` (missing channels
   above it are created). A channel sees its own secrets, then those of each channel above it up to
   the project, the nearest one winning; `--no-inherit` cuts that chain. Channels inside a protected

@@ -3,8 +3,7 @@ name = "the-pit"
 version = "0.1.1"
 edition = "2021"
 description = "The Pit: a local, encrypted secrets vault for developers, with an integration rail that pushes secrets where they need to go."
-license-file = "LICENSE"
-publish = false
+license = "AGPL-3.0-only"
 readme = "README.md"
 default-run = "pit"
 

@@ -19,6 +19,15 @@ Thanks for helping. A few things matter more here than in most projects, because
 
 [AGENTS.md](AGENTS.md) has a map of the source.
 
+## Licensing of contributions
+
+The Pit is AGPL-3.0 and also sold under commercial licenses ([COMMERCIAL.md](COMMERCIAL.md)). To make
+that possible, contributions are accepted under the [Contributor License Agreement](CLA.md): you keep
+your copyright and grant the maintainer the right to include your work in both. Confirm it in your pull
+request description:
+
+> I have read CLA.md and agree to its terms for this and my future contributions.
+
 ## Building and testing
 
 ```sh
